@@ -36,7 +36,18 @@ In plain terms: many items can collapse into one story, while still keeping ever
 
 ## Quick Start (Local)
 
-1. Start backend API:
+1. Bootstrap repo dependencies and hooks:
+
+```bash
+make bootstrap
+```
+
+```bash
+# alternate
+./scripts/bootstrap.sh
+```
+
+2. Start backend API:
 
 ```bash
 cd backend
@@ -46,21 +57,17 @@ cd backend
 go run ./cmd/scoop serve --env .env --host 0.0.0.0 --port 8090
 ```
 
-2. Start frontend dev server:
+3. Start frontend dev server:
 
 ```bash
 cd frontend
 ```
 
 ```bash
-pnpm install
-```
-
-```bash
 pnpm dev
 ```
 
-3. Open the UI:
+4. Open the UI:
 
 - `http://127.0.0.1:5173`
 

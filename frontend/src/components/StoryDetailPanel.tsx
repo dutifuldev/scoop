@@ -59,6 +59,7 @@ function memberGroupKey(member: StoryArticle): string {
 
 const previewRequestBatchSize = 4;
 const previewRequestDebounceMs = 120;
+const expandedArticlePreviewMaxChars = 4000;
 const inlineLinkPattern =
   /\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]}>,]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)\]}>,]*)?)/gi;
 const discordMessagePattern = /^https?:\/\/discord\.com\/channels\/([^/]+)\/([^/]+)\/([^/?#]+)/i;
@@ -438,7 +439,7 @@ export function StoryDetailPanel({
       });
 
       for (const itemUUID of batch) {
-        void getStoryArticlePreview(itemUUID, 1000)
+        void getStoryArticlePreview(itemUUID, expandedArticlePreviewMaxChars)
           .then((preview) => {
             setItemPreviewByUUID((previous) => ({
               ...previous,

@@ -7,7 +7,7 @@ import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { StoryDetailResponse } from "../types";
 
 vi.mock("../api", () => ({
-  getStoryArticlePreview: vi.fn(async (storyMemberUUID: string, _maxChars = 1000) => ({
+  getStoryArticlePreview: vi.fn(async (storyMemberUUID: string, _maxChars = 4000) => ({
     story_article_uuid: storyMemberUUID,
     preview_text: `Fetched preview for ${storyMemberUUID}.\n\nSecond paragraph for ${storyMemberUUID}.`,
     source: "normalized_text",
@@ -175,8 +175,8 @@ describe("StoryDetailPanel", () => {
       expect(screen.getByText("Fetched preview for member-2.")).toBeInTheDocument();
       expect(screen.queryByText("EN")).not.toBeInTheDocument();
       expect(screen.queryByText("Fetched content by URL")).not.toBeInTheDocument();
-      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 1000);
-      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-2", 1000);
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-2", 4000);
     });
   });
 
@@ -214,8 +214,8 @@ describe("StoryDetailPanel", () => {
           "simon_willison:simonwillison.net_2026_Feb_11_glm-5 • exact_url • score 1.000",
         ),
       ).toBeInTheDocument();
-      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 1000);
-      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 1000);
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 4000);
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 4000);
     });
   });
 
@@ -225,8 +225,11 @@ describe("StoryDetailPanel", () => {
         queries: { retry: false },
       },
     });
-    const discordLinkText =
-      "Evidence:\n\n- [Ephemeral watches discussion in Discord](discord.com/channels/1/2/3)";
+    const discordLinkText = `${"Context. ".repeat(130)}
+
+Evidence:
+
+- [Ephemeral watches discussion in Discord](discord.com/channels/1/2/3)`;
 
     vi.mocked(getStoryArticlePreview).mockImplementation(async (storyMemberUUID: string) => ({
       story_article_uuid: storyMemberUUID,
@@ -255,6 +258,7 @@ describe("StoryDetailPanel", () => {
       name: "Ephemeral watches discussion in Discord",
     });
     expect(link).toHaveAttribute("href", "https://discord.com/channels/1/2/3");
+    expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
   });
 
   it("does not request translation for disabled member collections", async () => {
@@ -290,7 +294,7 @@ describe("StoryDetailPanel", () => {
     );
 
     await waitFor(() => {
-      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 1000);
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
     });
     expect(vi.mocked(requestTranslation)).not.toHaveBeenCalled();
   });

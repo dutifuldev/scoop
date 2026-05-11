@@ -4,10 +4,10 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Manrope", "Segoe UI", "sans-serif"],
-        display: ["Space Grotesk", "Manrope", "sans-serif"],
-        news: ["Inter", "Manrope", "Segoe UI", "sans-serif"],
-        mono: ["IBM Plex Mono", "monospace"],
+        sans: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
+        display: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
+        news: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
+        mono: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
       },
       colors: {
         panel: {

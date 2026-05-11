@@ -797,6 +797,7 @@ export function StoryDetailPanel({
               Boolean(itemPreviewErrorByUUID[member.story_article_uuid]),
             );
             const showTextModeToggle = hasOriginalContent && hasTranslatedContent;
+            const showTextBlockLabels = showTextModeToggle;
             const orderedBlocks =
               detailTextMode === "translated"
                 ? [
@@ -915,7 +916,9 @@ export function StoryDetailPanel({
                               key={`${group.key}-${block.key}`}
                               className={`detail-text-block detail-text-block-${block.key}`.trim()}
                             >
-                              <p className="detail-text-label">{block.label}</p>
+                              {showTextBlockLabels ? (
+                                <p className="detail-text-label">{block.label}</p>
+                              ) : null}
                               {block.paragraphs.map((paragraph, index) =>
                                 renderTextBlock(
                                   paragraph,

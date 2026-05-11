@@ -3,6 +3,13 @@
 
 set -e
 
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "[husky] golangci-lint is required but was not found."
+  echo "[husky] Install with: ./scripts/bootstrap.sh"
+  echo "[husky] Or run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+  exit 1
+fi
+
 echo "[husky] gofmt + golangci-lint"
 cd backend
 gofmt -w .

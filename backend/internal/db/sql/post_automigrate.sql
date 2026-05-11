@@ -263,6 +263,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
 CREATE INDEX IF NOT EXISTS idx_user_settings_preferred_language
 	ON news.user_settings (preferred_language);
 
+CREATE INDEX IF NOT EXISTS idx_collection_settings_translation_mode
+	ON news.collection_settings (translation_mode);
+
 DO $$
 BEGIN
 	IF NOT EXISTS (
@@ -814,8 +817,56 @@ BEGIN
 		ALTER TABLE news.user_settings
 			ADD CONSTRAINT user_settings_preferred_language_check CHECK (length(trim(preferred_language)) > 0);
 	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'collection_settings_collection_check'
+			AND conrelid = 'news.collection_settings'::regclass
+	) THEN
+		ALTER TABLE news.collection_settings
+			ADD CONSTRAINT collection_settings_collection_check CHECK (length(trim(collection)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'collection_settings_translation_mode_check'
+			AND conrelid = 'news.collection_settings'::regclass
+	) THEN
+		ALTER TABLE news.collection_settings
+			ADD CONSTRAINT collection_settings_translation_mode_check CHECK (translation_mode IN ('enabled', 'disabled'));
+	END IF;
 END
 $$;
+
+INSERT INTO news.collection_settings (collection, translation_mode, created_at, updated_at)
+VALUES
+	('china_news', 'enabled', now(), now()),
+	('metal_news', 'enabled', now(), now()),
+	('openclaw', 'disabled', now(), now())
+ON CONFLICT (collection) DO NOTHING;
+
+INSERT INTO news.collection_settings (collection, translation_mode, created_at, updated_at)
+SELECT
+	collections.collection,
+	CASE
+		WHEN collections.collection IN ('china_news', 'metal_news') THEN 'enabled'
+		ELSE 'disabled'
+	END AS translation_mode,
+	now(),
+	now()
+FROM (
+	SELECT DISTINCT collection
+	FROM news.articles
+	WHERE deleted_at IS NULL
+	UNION
+	SELECT DISTINCT collection
+	FROM news.stories
+	WHERE deleted_at IS NULL
+) collections
+WHERE length(trim(collections.collection)) > 0
+ON CONFLICT (collection) DO NOTHING;
 
 DO $$
 BEGIN

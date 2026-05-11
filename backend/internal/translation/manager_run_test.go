@@ -4,21 +4,31 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"horse.fit/scoop/internal/db"
 )
 
 type stubTranslationStore struct {
-	upsertSourceID      int64
-	upsertSourceCalls   []db.UpsertTranslationSourceParams
-	upsertResultCalls   []db.UpsertTranslationResultParams
-	lookupCachedResult  *db.CachedTranslationRow
-	lookupCachedErr     error
-	lookupCachedTargets []string
+	upsertSourceID       int64
+	upsertSourceCalls    []db.UpsertTranslationSourceParams
+	upsertResultCalls    []db.UpsertTranslationResultParams
+	storyRow             db.TranslationStoryTarget
+	articleRow           db.TranslationArticleTarget
+	articleRows          []db.TranslationArticleTarget
+	storyTranslationRows []db.StoryTranslationRow
+	collectionMode       string
+	collectionModes      map[string]string
+	lookupCachedResult   *db.CachedTranslationRow
+	lookupCachedErr      error
+	lookupCachedTargets  []string
 }
 
 func (s *stubTranslationStore) GetTranslationStoryByUUID(_ context.Context, _ string) (db.TranslationStoryTarget, error) {
+	if s.storyRow.StoryID != 0 {
+		return s.storyRow, nil
+	}
 	return db.TranslationStoryTarget{}, db.ErrNoRows
 }
 
@@ -27,15 +37,30 @@ func (s *stubTranslationStore) ListTranslationStoriesByCollection(_ context.Cont
 }
 
 func (s *stubTranslationStore) ListTranslationStoryArticles(_ context.Context, _ int64) ([]db.TranslationArticleTarget, error) {
-	return nil, nil
+	return s.articleRows, nil
 }
 
 func (s *stubTranslationStore) GetTranslationArticleByUUID(_ context.Context, _ string) (db.TranslationArticleTarget, error) {
+	if s.articleRow.ArticleID != 0 {
+		return s.articleRow, nil
+	}
 	return db.TranslationArticleTarget{}, db.ErrNoRows
 }
 
+func (s *stubTranslationStore) GetCollectionTranslationMode(_ context.Context, collection string) (string, error) {
+	if s.collectionModes != nil {
+		if mode, ok := s.collectionModes[collection]; ok {
+			return mode, nil
+		}
+	}
+	if s.collectionMode != "" {
+		return s.collectionMode, nil
+	}
+	return db.DefaultCollectionTranslationMode(collection), nil
+}
+
 func (s *stubTranslationStore) ListStoryTranslationRows(_ context.Context, _ int64) ([]db.StoryTranslationRow, error) {
-	return nil, nil
+	return s.storyTranslationRows, nil
 }
 
 func (s *stubTranslationStore) LookupCachedTranslationRow(
@@ -191,5 +216,166 @@ func TestRunTasks_SkipsWhenSourceEqualsTarget(t *testing.T) {
 	}
 	if len(store.upsertResultCalls) != 0 {
 		t.Fatalf("did not expect upsert result calls, got %d", len(store.upsertResultCalls))
+	}
+}
+
+func TestTranslateStoryByUUID_RejectsDisabledCollection(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "openclaw",
+			Title:      "OpenClaw story",
+			SourceLang: "en",
+		},
+		collectionMode: db.TranslationModeDisabled,
+	}
+	registry := NewRegistry("stub")
+	if err := registry.Register(&stubProvider{name: "stub", resp: TranslateResponse{Text: "ignored"}}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	manager := NewManagerWithStore(store, registry)
+
+	_, err := manager.TranslateStoryByUUID(context.Background(), "story-uuid", RunOptions{TargetLang: "zh", Provider: "stub"})
+	if !errors.Is(err, ErrTranslationDisabled) {
+		t.Fatalf("expected ErrTranslationDisabled, got %v", err)
+	}
+	if len(store.upsertSourceCalls) != 0 {
+		t.Fatalf("did not expect upsert source calls, got %d", len(store.upsertSourceCalls))
+	}
+}
+
+func TestTranslateStoryByUUID_SkipsDisabledMemberArticleCollections(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		upsertSourceID: 77,
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "china_news",
+			Title:      "China story",
+			SourceLang: "zh",
+		},
+		articleRows: []db.TranslationArticleTarget{
+			{
+				ArticleID:  101,
+				Collection: "openclaw",
+				Title:      "Disabled member title",
+				Text:       "Disabled member text",
+				SourceLang: "en",
+			},
+			{
+				ArticleID:  102,
+				Collection: "metal_news",
+				Title:      "Enabled member title",
+				Text:       "Enabled member text",
+				SourceLang: "en",
+			},
+		},
+		collectionModes: map[string]string{
+			"china_news": db.TranslationModeEnabled,
+			"metal_news": db.TranslationModeEnabled,
+			"openclaw":   db.TranslationModeDisabled,
+		},
+	}
+	provider := &stubProvider{name: "stub", resp: TranslateResponse{Text: "translated"}}
+	registry := NewRegistry("stub")
+	if err := registry.Register(provider); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	manager := NewManagerWithStore(store, registry)
+
+	stats, err := manager.TranslateStoryByUUID(context.Background(), "story-uuid", RunOptions{TargetLang: "en", Provider: "stub"})
+	if err != nil {
+		t.Fatalf("translate story: %v", err)
+	}
+	if stats.Total != 3 {
+		t.Fatalf("unexpected total tasks: got %d want 3", stats.Total)
+	}
+
+	for _, call := range store.upsertSourceCalls {
+		if call.SourceID == 101 {
+			t.Fatalf("disabled collection article was queued for translation: %+v", call)
+		}
+	}
+}
+
+func TestListStoryTranslationsByUUID_RejectsDisabledCollection(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "openclaw",
+			Title:      "OpenClaw story",
+			SourceLang: "en",
+		},
+		collectionMode: db.TranslationModeDisabled,
+	}
+	manager := NewManagerWithStore(store, NewRegistry("stub"))
+
+	_, err := manager.ListStoryTranslationsByUUID(context.Background(), "story-uuid")
+	if !errors.Is(err, ErrTranslationDisabled) {
+		t.Fatalf("expected ErrTranslationDisabled, got %v", err)
+	}
+}
+
+func TestListStoryTranslationsByUUID_FiltersDisabledMemberArticleCollections(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "china_news",
+			Title:      "China story",
+			SourceLang: "zh",
+		},
+		storyTranslationRows: []db.StoryTranslationRow{
+			{
+				TranslationUUID:  "story-translation",
+				SourceType:       SourceTypeStoryTitle,
+				SourceID:         42,
+				SourceCollection: "china_news",
+				TranslatedText:   "story",
+			},
+			{
+				TranslationUUID:  "disabled-article-translation",
+				SourceType:       SourceTypeArticleText,
+				SourceID:         101,
+				SourceCollection: "openclaw",
+				TranslatedText:   "disabled",
+			},
+			{
+				TranslationUUID:  "enabled-article-translation",
+				SourceType:       SourceTypeArticleText,
+				SourceID:         102,
+				SourceCollection: "metal_news",
+				TranslatedText:   "enabled",
+			},
+		},
+		collectionModes: map[string]string{
+			"china_news": db.TranslationModeEnabled,
+			"metal_news": db.TranslationModeEnabled,
+			"openclaw":   db.TranslationModeDisabled,
+		},
+	}
+	manager := NewManagerWithStore(store, NewRegistry("stub"))
+
+	items, err := manager.ListStoryTranslationsByUUID(context.Background(), "story-uuid")
+	if err != nil {
+		t.Fatalf("list story translations: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("unexpected translation count: got %d want 2", len(items))
+	}
+	for _, item := range items {
+		if item.SourceID == 101 {
+			t.Fatalf("disabled collection translation was returned: %+v", item)
+		}
 	}
 }

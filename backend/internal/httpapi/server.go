@@ -71,6 +71,7 @@ type storyListItem struct {
 	StoryID          int64                `json:"story_id"`
 	StoryUUID        string               `json:"story_uuid"`
 	Collection       string               `json:"collection"`
+	TranslationMode  string               `json:"translation_mode"`
 	Title            string               `json:"title"`
 	OriginalTitle    string               `json:"original_title"`
 	TranslatedTitle  *string              `json:"translated_title"`
@@ -90,6 +91,7 @@ type StoryArticle struct {
 	Source               string         `json:"source"`
 	SourceItemID         string         `json:"source_item_id"`
 	Collection           string         `json:"collection"`
+	TranslationMode      string         `json:"translation_mode"`
 	CanonicalURL         *string        `json:"canonical_url,omitempty"`
 	PublishedAt          *time.Time     `json:"published_at,omitempty"`
 	NormalizedTitle      string         `json:"normalized_title"`
@@ -119,10 +121,15 @@ type storyDetail struct {
 
 type collectionSummary struct {
 	Collection      string     `json:"collection"`
+	TranslationMode string     `json:"translation_mode"`
 	Articles        int64      `json:"articles"`
 	Stories         int64      `json:"stories"`
 	StoryItems      int64      `json:"story_items"`
 	LastStorySeenAt *time.Time `json:"last_story_seen_at,omitempty"`
+}
+
+type updateCollectionSettingsRequest struct {
+	TranslationMode string `json:"translation_mode"`
 }
 
 type statsResponse struct {
@@ -338,6 +345,7 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.PUT("/me/settings", s.handlePutMySettings)
 	protected.GET("/stats", s.handleStats)
 	protected.GET("/collections", s.handleCollections)
+	protected.PATCH("/collections/:collection/settings", s.handleUpdateCollectionSettings)
 	protected.GET("/story-days", s.handleStoryDays)
 	protected.GET("/stories", s.handleStories)
 	protected.GET("/stories/:story_uuid", s.handleStoryDetail)
@@ -438,6 +446,36 @@ func (s *Server) handleCollections(c echo.Context) error {
 	}
 	return success(c, map[string]any{
 		"items": rows,
+	})
+}
+
+func (s *Server) handleUpdateCollectionSettings(c echo.Context) error {
+	collection := normalizeCollection(c.Param("collection"))
+	if collection == "" {
+		return failValidation(c, map[string]string{"collection": "is required"})
+	}
+
+	var req updateCollectionSettingsRequest
+	if err := decodeJSONBody(c, &req); err != nil {
+		return failValidation(c, map[string]string{"body": err.Error()})
+	}
+
+	mode := db.NormalizeCollectionTranslationMode(req.TranslationMode)
+	if strings.TrimSpace(req.TranslationMode) == "" {
+		return failValidation(c, map[string]string{"translation_mode": "is required"})
+	}
+	if mode != strings.ToLower(strings.TrimSpace(req.TranslationMode)) {
+		return failValidation(c, map[string]string{"translation_mode": "must be enabled or disabled"})
+	}
+
+	row, err := s.pool.UpsertCollectionTranslationMode(c.Request().Context(), collection, mode)
+	if err != nil {
+		s.logger.Error().Err(err).Str("collection", collection).Msg("update collection settings failed")
+		return internalError(c, "Failed to update collection settings")
+	}
+
+	return success(c, map[string]any{
+		"settings": row,
 	})
 }
 
@@ -591,6 +629,8 @@ func (s *Server) handleTranslate(c echo.Context) error {
 			return failNotFound(c, "Story not found")
 		case errors.Is(err, translation.ErrArticleNotFound):
 			return failNotFound(c, "Article not found")
+		case errors.Is(err, translation.ErrTranslationDisabled):
+			return failValidation(c, map[string]string{"collection": "translation is disabled for this collection"})
 		case strings.Contains(strings.ToLower(err.Error()), "provider") && strings.Contains(strings.ToLower(err.Error()), "not registered"):
 			return failValidation(c, map[string]string{"provider": err.Error()})
 		default:
@@ -627,6 +667,9 @@ func (s *Server) handleStoryTranslations(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, translation.ErrStoryNotFound) {
 			return failNotFound(c, "Story not found")
+		}
+		if errors.Is(err, translation.ErrTranslationDisabled) {
+			return failValidation(c, map[string]string{"collection": "translation is disabled for this collection"})
 		}
 		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("query story translations failed")
 		return internalError(c, "Failed to load story translations")
@@ -849,6 +892,13 @@ SELECT
 	s.story_id,
 	s.story_uuid::text,
 	s.collection,
+	COALESCE(
+		cs.translation_mode,
+		CASE
+			WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	s.canonical_title AS original_title,
 	st.translated_text,
 	s.canonical_url,
@@ -876,6 +926,8 @@ FROM news.stories s
 LEFT JOIN news.articles rd
 	ON rd.article_id = s.representative_article_id
 	AND rd.deleted_at IS NULL
+LEFT JOIN news.collection_settings cs
+	ON cs.collection = s.collection
 LEFT JOIN LATERAL (
 	SELECT tr.translated_text
 	FROM news.translation_sources ts
@@ -884,6 +936,13 @@ LEFT JOIN LATERAL (
 	WHERE ts.source_type = 'story_title'
 		AND ts.source_id = s.story_id
 		AND tr.target_lang = $6
+		AND COALESCE(
+			cs.translation_mode,
+			CASE
+				WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+				ELSE 'disabled'
+			END
+		) = 'enabled'
 	ORDER BY ts.captured_at DESC, ts.translation_source_id DESC
 	LIMIT 1
 ) st ON TRUE
@@ -928,6 +987,7 @@ OFFSET $8
 			&row.StoryID,
 			&row.StoryUUID,
 			&row.Collection,
+			&row.TranslationMode,
 			&row.OriginalTitle,
 			&row.TranslatedTitle,
 			&row.CanonicalURL,
@@ -945,6 +1005,7 @@ OFFSET $8
 			return 0, nil, fmt.Errorf("scan story row: %w", err)
 		}
 
+		row.TranslationMode = db.NormalizeCollectionTranslationMode(row.TranslationMode)
 		if repArticleUUID != nil && repSource != nil && repSourceItemID != nil {
 			row.Representative = &storyRepresentative{
 				ArticleUUID:  *repArticleUUID,
@@ -1040,6 +1101,13 @@ SELECT
 	s.story_id,
 	s.story_uuid::text,
 	s.collection,
+	COALESCE(
+		cs.translation_mode,
+		CASE
+			WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	s.canonical_title AS original_title,
 	st.translated_text,
 	s.canonical_url,
@@ -1067,6 +1135,8 @@ FROM news.stories s
 LEFT JOIN news.articles rd
 	ON rd.article_id = s.representative_article_id
 	AND rd.deleted_at IS NULL
+LEFT JOIN news.collection_settings cs
+	ON cs.collection = s.collection
 LEFT JOIN LATERAL (
 	SELECT tr.translated_text
 	FROM news.translation_sources ts
@@ -1075,6 +1145,13 @@ LEFT JOIN LATERAL (
 	WHERE ts.source_type = 'story_title'
 		AND ts.source_id = s.story_id
 		AND tr.target_lang = $2
+		AND COALESCE(
+			cs.translation_mode,
+			CASE
+				WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+				ELSE 'disabled'
+			END
+		) = 'enabled'
 	ORDER BY ts.captured_at DESC, ts.translation_source_id DESC
 	LIMIT 1
 ) st ON TRUE
@@ -1093,6 +1170,7 @@ WHERE s.story_uuid = $1::uuid
 		&story.StoryID,
 		&story.StoryUUID,
 		&story.Collection,
+		&story.TranslationMode,
 		&story.OriginalTitle,
 		&story.TranslatedTitle,
 		&story.CanonicalURL,
@@ -1112,6 +1190,7 @@ WHERE s.story_uuid = $1::uuid
 		}
 		return nil, fmt.Errorf("query story: %w", err)
 	}
+	story.TranslationMode = db.NormalizeCollectionTranslationMode(story.TranslationMode)
 	story.Title = story.OriginalTitle
 	if lang != "" && story.TranslatedTitle != nil {
 		story.Title = *story.TranslatedTitle
@@ -1133,6 +1212,13 @@ SELECT
 	d.source,
 	d.source_item_id,
 	d.collection,
+	COALESCE(
+		dcs.translation_mode,
+		CASE
+			WHEN d.collection IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	d.canonical_url,
 	d.published_at,
 	d.normalized_title,
@@ -1155,6 +1241,8 @@ FROM news.story_articles sm
 JOIN news.articles d
 	ON d.article_id = sm.article_id
 	AND d.deleted_at IS NULL
+LEFT JOIN news.collection_settings dcs
+	ON dcs.collection = d.collection
 LEFT JOIN LATERAL (
 	SELECT atr.translated_text
 	FROM news.translation_sources ats
@@ -1163,6 +1251,13 @@ LEFT JOIN LATERAL (
 	WHERE ats.source_type = 'article_title'
 		AND ats.source_id = d.article_id
 		AND atr.target_lang = $2
+		AND COALESCE(
+			dcs.translation_mode,
+			CASE
+				WHEN d.collection IN ('china_news', 'metal_news') THEN 'enabled'
+				ELSE 'disabled'
+			END
+		) = 'enabled'
 	ORDER BY ats.captured_at DESC, ats.translation_source_id DESC
 	LIMIT 1
 ) at ON TRUE
@@ -1174,6 +1269,13 @@ LEFT JOIN LATERAL (
 	WHERE axs.source_type = 'article_text'
 		AND axs.source_id = d.article_id
 		AND axr.target_lang = $2
+		AND COALESCE(
+			dcs.translation_mode,
+			CASE
+				WHEN d.collection IN ('china_news', 'metal_news') THEN 'enabled'
+				ELSE 'disabled'
+			END
+		) = 'enabled'
 	ORDER BY axs.captured_at DESC, axs.translation_source_id DESC
 	LIMIT 1
 ) ax ON TRUE
@@ -1201,6 +1303,7 @@ ORDER BY sm.matched_at DESC
 			&member.Source,
 			&member.SourceItemID,
 			&member.Collection,
+			&member.TranslationMode,
 			&member.CanonicalURL,
 			&member.PublishedAt,
 			&member.NormalizedTitle,
@@ -1222,6 +1325,7 @@ ORDER BY sm.matched_at DESC
 		); err != nil {
 			return nil, fmt.Errorf("scan story article: %w", err)
 		}
+		member.TranslationMode = db.NormalizeCollectionTranslationMode(member.TranslationMode)
 		member.OriginalTitle = member.NormalizedTitle
 		member.OriginalText = member.NormalizedText
 		if lang != "" {
@@ -1280,6 +1384,13 @@ story_counts AS (
 )
 SELECT
 	COALESCE(d.collection, s.collection) AS collection,
+	COALESCE(
+		cs.translation_mode,
+		CASE
+			WHEN COALESCE(d.collection, s.collection) IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	COALESCE(d.articles, 0) AS articles,
 	COALESCE(s.stories, 0) AS stories,
 	COALESCE(s.story_items, 0) AS story_items,
@@ -1287,6 +1398,8 @@ SELECT
 FROM article_counts d
 FULL OUTER JOIN story_counts s
 	ON s.collection = d.collection
+LEFT JOIN news.collection_settings cs
+	ON cs.collection = COALESCE(d.collection, s.collection)
 ORDER BY 1
 `
 
@@ -1299,9 +1412,17 @@ ORDER BY 1
 	items := make([]collectionSummary, 0, 8)
 	for rows.Next() {
 		var row collectionSummary
-		if err := rows.Scan(&row.Collection, &row.Articles, &row.Stories, &row.StoryItems, &row.LastStorySeenAt); err != nil {
+		if err := rows.Scan(
+			&row.Collection,
+			&row.TranslationMode,
+			&row.Articles,
+			&row.Stories,
+			&row.StoryItems,
+			&row.LastStorySeenAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan collection summary: %w", err)
 		}
+		row.TranslationMode = db.NormalizeCollectionTranslationMode(row.TranslationMode)
 		items = append(items, row)
 	}
 	if err := rows.Err(); err != nil {

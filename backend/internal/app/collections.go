@@ -61,6 +61,7 @@ func runCollections(args []string) int {
 	for _, row := range rows {
 		tableRows = append(tableRows, []string{
 			row.Collection,
+			row.TranslationMode,
 			fmt.Sprintf("%d", row.ArticleCount),
 			fmt.Sprintf("%d", row.StoryCount),
 			formatUTCTimestampPtr(row.EarliestArticleAt),
@@ -69,7 +70,7 @@ func runCollections(args []string) int {
 	}
 
 	if err := writeTable(
-		[]string{"collection", "article_count", "story_count", "earliest_article", "latest_article"},
+		[]string{"collection", "translation_mode", "article_count", "story_count", "earliest_article", "latest_article"},
 		tableRows,
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)

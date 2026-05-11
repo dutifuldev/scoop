@@ -17,6 +17,10 @@ import {
   getDesktopFeedWidthPct,
   setDesktopFeedWidthPct,
 } from "./lib/userSettings";
+import {
+  defaultCollectionTranslationMode,
+  isCollectionTranslationEnabled,
+} from "./lib/collectionTranslation";
 import { buildStoryFilters } from "./lib/viewerFilters";
 import { formatCount } from "./lib/viewerFormat";
 import { normalizeLanguageTag } from "./lib/language";
@@ -46,8 +50,11 @@ export function StoryViewerPage(): JSX.Element {
     [rawSearch],
   );
 
-  const [showAdvancedSearch, setShowAdvancedSearch] = useState(() => Boolean(viewerSearch.from || viewerSearch.to));
-  const routeCollection = typeof rawParams.collection === "string" ? rawParams.collection.trim() : "";
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(() =>
+    Boolean(viewerSearch.from || viewerSearch.to),
+  );
+  const routeCollection =
+    typeof rawParams.collection === "string" ? rawParams.collection.trim() : "";
   const baseFilters = useMemo(() => toStoryFilters(viewerSearch), [viewerSearch]);
   const filters = useMemo(
     () =>
@@ -63,7 +70,9 @@ export function StoryViewerPage(): JSX.Element {
   const selectedItemUUID = typeof rawParams.itemUUID === "string" ? rawParams.itemUUID : "";
 
   const [searchInput, setSearchInput] = useState(filters.query);
-  const [desktopFeedWidthPct, setDesktopFeedWidthPctState] = useState(() => getDesktopFeedWidthPct());
+  const [desktopFeedWidthPct, setDesktopFeedWidthPctState] = useState(() =>
+    getDesktopFeedWidthPct(),
+  );
   const [translatingStoryUUIDs, setTranslatingStoryUUIDs] = useState<string[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState("");
@@ -126,7 +135,10 @@ export function StoryViewerPage(): JSX.Element {
     }),
     [filters, apiLanguage],
   );
-  const feedPanelSize = useMemo(() => `${feedWidthBounds.defaultValue}%`, [feedWidthBounds.defaultValue]);
+  const feedPanelSize = useMemo(
+    () => `${feedWidthBounds.defaultValue}%`,
+    [feedWidthBounds.defaultValue],
+  );
   const feedPanelMin = useMemo(() => `${feedWidthBounds.min}%`, [feedWidthBounds.min]);
   const feedPanelMax = useMemo(() => `${feedWidthBounds.max}%`, [feedWidthBounds.max]);
   const desktopLayout = useMemo(
@@ -170,6 +182,9 @@ export function StoryViewerPage(): JSX.Element {
     selectedStoryUUID,
     language: apiLanguage,
   });
+  const detailTranslationMode =
+    detail?.story.translation_mode ?? defaultCollectionTranslationMode(filters.collection);
+  const detailActiveLang = isCollectionTranslationEnabled(detailTranslationMode) ? apiLanguage : "";
 
   const { dayNav, selectedDay } = useDayNavigationState({
     dayBuckets,
@@ -249,7 +264,12 @@ export function StoryViewerPage(): JSX.Element {
       return;
     }
 
-    const collection = (detail?.story.collection || routeCollection || filters.collection || "").trim();
+    const collection = (
+      detail?.story.collection ||
+      routeCollection ||
+      filters.collection ||
+      ""
+    ).trim();
     navigateToStoryPath(collection, selectedStoryUUID, itemUUID);
   }
 
@@ -258,7 +278,12 @@ export function StoryViewerPage(): JSX.Element {
       return;
     }
 
-    const collection = (detail?.story.collection || routeCollection || filters.collection || "").trim();
+    const collection = (
+      detail?.story.collection ||
+      routeCollection ||
+      filters.collection ||
+      ""
+    ).trim();
     navigateToStoryPath(collection, selectedStoryUUID);
   }
 
@@ -381,26 +406,29 @@ export function StoryViewerPage(): JSX.Element {
     }
   }
 
-  const onTranslationStateChange = useCallback((storyUUID: string, isTranslating: boolean): void => {
-    if (!storyUUID) {
-      return;
-    }
+  const onTranslationStateChange = useCallback(
+    (storyUUID: string, isTranslating: boolean): void => {
+      if (!storyUUID) {
+        return;
+      }
 
-    setTranslatingStoryUUIDs((previous) => {
-      if (isTranslating) {
-        if (previous.includes(storyUUID)) {
+      setTranslatingStoryUUIDs((previous) => {
+        if (isTranslating) {
+          if (previous.includes(storyUUID)) {
+            return previous;
+          }
+          return [...previous, storyUUID];
+        }
+
+        if (!previous.includes(storyUUID)) {
           return previous;
         }
-        return [...previous, storyUUID];
-      }
 
-      if (!previous.includes(storyUUID)) {
-        return previous;
-      }
-
-      return previous.filter((uuid) => uuid !== storyUUID);
-    });
-  }, []);
+        return previous.filter((uuid) => uuid !== storyUUID);
+      });
+    },
+    [],
+  );
 
   const currentCollectionLabel = useCurrentCollectionLabel(collections, filters.collection);
 
@@ -492,7 +520,7 @@ export function StoryViewerPage(): JSX.Element {
               selectedStoryUUID={selectedStoryUUID}
               selectedItemUUID={selectedItemUUID}
               detail={detail}
-              activeLang={apiLanguage}
+              activeLang={detailActiveLang}
               isLoading={isDetailPending}
               error={detailError}
               onSelectItem={goToItem}
@@ -519,7 +547,8 @@ export function StoryViewerPage(): JSX.Element {
             await updateSettings({ preferred_language: nextLanguage });
             setIsSettingsOpen(false);
           } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to update translation language";
+            const message =
+              err instanceof Error ? err.message : "Failed to update translation language";
             setSettingsError(message);
           } finally {
             setIsSavingSettings(false);

@@ -270,6 +270,16 @@ type TranslationResult struct {
 
 func (TranslationResult) TableName() string { return "news.translation_results" }
 
+// CollectionSettings maps news.collection_settings.
+type CollectionSettings struct {
+	Collection      string    `gorm:"column:collection;type:text;primaryKey"`
+	TranslationMode string    `gorm:"column:translation_mode;type:text;not null;default:disabled"`
+	CreatedAt       time.Time `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;type:timestamptz;not null;default:now()"`
+}
+
+func (CollectionSettings) TableName() string { return "news.collection_settings" }
+
 // User maps news.users.
 type User struct {
 	UserID             int64      `gorm:"column:user_id;primaryKey;autoIncrement"`
@@ -320,6 +330,7 @@ func autoMigrateModels() []any {
 		&DigestEntry{},
 		&TranslationSource{},
 		&TranslationResult{},
+		&CollectionSettings{},
 		&User{},
 		&Session{},
 		&UserSettings{},

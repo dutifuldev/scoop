@@ -173,6 +173,7 @@ describe("StoryDetailPanel", () => {
     await waitFor(() => {
       expect(screen.getByText("Fetched preview for member-1.")).toBeInTheDocument();
       expect(screen.getByText("Fetched preview for member-2.")).toBeInTheDocument();
+      expect(screen.queryByText("EN")).not.toBeInTheDocument();
       expect(screen.queryByText("Fetched content by URL")).not.toBeInTheDocument();
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 1000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-2", 1000);

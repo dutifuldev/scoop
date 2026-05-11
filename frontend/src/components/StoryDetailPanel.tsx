@@ -377,16 +377,11 @@ export function StoryDetailPanel({
     const translatedTitle = (detail.story.translated_title || "").trim();
     const showTranslatedTitle = activeLang !== "" && translatedTitle !== "";
     const displayTitle = showTranslatedTitle ? translatedTitle : originalTitle;
-    const detectedLanguage = (detail.story.detected_language || "").trim().toLowerCase();
-    const showDetectedLanguage = detectedLanguage !== "" && detectedLanguage !== "und";
 
     return (
       <>
         <div className="detail-title-row">
           <h2 className="detail-title">{displayTitle || "(untitled)"}</h2>
-          {showDetectedLanguage ? (
-            <span className="detail-language-badge">{detectedLanguage.toUpperCase()}</span>
-          ) : null}
         </div>
         {showTranslatedTitle ? (
           <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>

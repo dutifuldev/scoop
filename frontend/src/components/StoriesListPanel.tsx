@@ -204,7 +204,9 @@ export function StoriesListPanel({
         <div ref={listRef} className="stories-list">
           {isLoading ? <p className="muted">Loading stories...</p> : null}
           {!isLoading && error ? <p className="muted">{error}</p> : null}
-          {!isLoading && !error && stories.length === 0 ? <p className="muted">No stories match this filter.</p> : null}
+          {!isLoading && !error && stories.length === 0 ? (
+            <p className="muted">No stories match this filter.</p>
+          ) : null}
 
           {!isLoading && !error
             ? stories.map((story) => {
@@ -213,8 +215,6 @@ export function StoriesListPanel({
                 const showTranslated = activeLang !== "" && translatedTitle !== "";
                 const displayTitle = showTranslated ? translatedTitle : originalTitle;
                 const isTranslatingStory = translatingStoryUUIDSet.has(story.story_uuid);
-                const detectedLanguage = (story.detected_language || "").trim().toLowerCase();
-                const showDetectedLanguage = detectedLanguage !== "" && detectedLanguage !== "und";
 
                 return (
                   <article
@@ -234,33 +234,36 @@ export function StoriesListPanel({
                       <h3 className="story-title">{displayTitle || "(untitled)"}</h3>
                       <div className="story-title-flags">
                         {isTranslatingStory ? (
-                          <span className="story-translating-indicator" aria-label="Translation in progress">
+                          <span
+                            className="story-translating-indicator"
+                            aria-label="Translation in progress"
+                          >
                             <span className="story-translating-dot" aria-hidden="true" />
                             Translating
                           </span>
                         ) : null}
                         {showTranslated ? (
-                          <span className="story-translation-badge" aria-label={`Translated to ${activeLang}`}>
+                          <span
+                            className="story-translation-badge"
+                            aria-label={`Translated to ${activeLang}`}
+                          >
                             [{activeLang.toUpperCase()}]
-                          </span>
-                        ) : null}
-                        {showDetectedLanguage ? (
-                          <span className="story-language-badge" aria-label={`Detected language ${detectedLanguage}`}>
-                            {detectedLanguage.toUpperCase()}
                           </span>
                         ) : null}
                       </div>
                     </header>
-                    <p className="story-meta">
-                      {buildFeedMetaText(story, showTimestampInFeed)}
-                    </p>
+                    <p className="story-meta">{buildFeedMetaText(story, showTimestampInFeed)}</p>
                   </article>
                 );
               })
             : null}
 
-          {!isLoading && !error ? <div ref={loadTriggerRef} className="stories-load-sentinel" aria-hidden="true" /> : null}
-          {isFetchingNextPage ? <p className="muted stories-status">Loading more stories...</p> : null}
+          {!isLoading && !error ? (
+            <div ref={loadTriggerRef} className="stories-load-sentinel" aria-hidden="true" />
+          ) : null}
+          {isFetchingNextPage ? (
+            <p className="muted stories-status">Loading more stories...</p>
+          ) : null}
           {!isFetchingNextPage && !hasNextPage && stories.length > 0 ? (
             <p className="muted stories-status">Reached the end of this story feed.</p>
           ) : null}
@@ -280,9 +283,14 @@ export function StoriesListPanel({
           }}
           aria-label="Open user menu"
         >
-          <span className="sidebar-user-bubble">{(currentUsername || "U").slice(0, 1).toUpperCase()}</span>
+          <span className="sidebar-user-bubble">
+            {(currentUsername || "U").slice(0, 1).toUpperCase()}
+          </span>
           <span className="sidebar-user-name">{currentUsername || "User"}</span>
-          <ChevronDown className={`sidebar-user-chevron ${isUserMenuOpen ? "open" : ""}`.trim()} aria-hidden="true" />
+          <ChevronDown
+            className={`sidebar-user-chevron ${isUserMenuOpen ? "open" : ""}`.trim()}
+            aria-hidden="true"
+          />
         </button>
 
         {isUserMenuOpen ? (

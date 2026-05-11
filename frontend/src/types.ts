@@ -21,6 +21,18 @@ export interface StoryRepresentative {
   published_at?: string;
 }
 
+export interface Tag {
+  tag_id: number;
+  tag_uuid: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StoryListItem {
   story_id: number;
   story_uuid: string;
@@ -37,6 +49,7 @@ export interface StoryListItem {
   source_count: number;
   article_count: number;
   representative?: StoryRepresentative;
+  tags?: Tag[];
 }
 
 export interface StoryArticle {
@@ -66,6 +79,7 @@ export interface StoryArticle {
   dedup_title_overlap?: number;
   dedup_date_consistency?: number;
   dedup_composite_score?: number;
+  tags?: Tag[];
 }
 
 export interface StoryDetailResponse {
@@ -135,6 +149,7 @@ export interface StoryFilters {
   from: string;
   to: string;
   lang: string;
+  tag: string;
 }
 
 export interface ViewerSearch {
@@ -145,6 +160,7 @@ export interface ViewerSearch {
   from?: string;
   to?: string;
   lang?: string;
+  tag?: string;
 }
 
 export interface DayNavigationState {

@@ -51,7 +51,7 @@ export function StoryViewerPage(): JSX.Element {
   );
 
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(() =>
-    Boolean(viewerSearch.from || viewerSearch.to),
+    Boolean(viewerSearch.from || viewerSearch.to || viewerSearch.tag),
   );
   const routeCollection =
     typeof rawParams.collection === "string" ? rawParams.collection.trim() : "";
@@ -88,13 +88,14 @@ export function StoryViewerPage(): JSX.Element {
   }, [filters.query]);
 
   useEffect(() => {
-    if (!showAdvancedSearch && (viewerSearch.from || viewerSearch.to)) {
+    if (!showAdvancedSearch && (viewerSearch.from || viewerSearch.to || viewerSearch.tag)) {
       const fallbackDay = viewerSearch.day || viewerSearch.from || viewerSearch.to;
       applySearch({
         ...viewerSearch,
         day: fallbackDay || undefined,
         from: undefined,
         to: undefined,
+        tag: undefined,
         page: undefined,
       });
     }
@@ -165,6 +166,7 @@ export function StoryViewerPage(): JSX.Element {
 
   const {
     collections,
+    tags,
     dayBuckets,
     stories,
     detail,
@@ -381,15 +383,24 @@ export function StoryViewerPage(): JSX.Element {
     });
   }
 
+  function onTagChange(value: string): void {
+    applySearch({
+      ...viewerSearch,
+      tag: value || undefined,
+      page: undefined,
+    });
+  }
+
   function onShowAdvancedSearchChange(value: boolean): void {
     setShowAdvancedSearch(value);
-    if (!value && (viewerSearch.from || viewerSearch.to)) {
+    if (!value && (viewerSearch.from || viewerSearch.to || viewerSearch.tag)) {
       const fallbackDay = viewerSearch.day || viewerSearch.from || viewerSearch.to;
       applySearch({
         ...viewerSearch,
         day: fallbackDay || undefined,
         from: undefined,
         to: undefined,
+        tag: undefined,
         page: undefined,
       });
       return;
@@ -483,6 +494,8 @@ export function StoryViewerPage(): JSX.Element {
               searchInput={searchInput}
               from={effectiveFilters.from}
               to={effectiveFilters.to}
+              selectedTag={effectiveFilters.tag}
+              availableTags={tags}
               activeLang={apiLanguage}
               translatingStoryUUIDs={translatingStoryUUIDs}
               totalItems={pagination.total_items}
@@ -498,6 +511,7 @@ export function StoryViewerPage(): JSX.Element {
               onShowAdvancedSearchChange={onShowAdvancedSearchChange}
               onFromChange={onFromChange}
               onToChange={onToChange}
+              onTagChange={onTagChange}
               onLoadNextPage={fetchNextStoriesPage}
               onSelectStory={goToStory}
               currentUsername={user?.username || "User"}
@@ -520,6 +534,7 @@ export function StoryViewerPage(): JSX.Element {
               selectedStoryUUID={selectedStoryUUID}
               selectedItemUUID={selectedItemUUID}
               detail={detail}
+              availableTags={tags}
               activeLang={detailActiveLang}
               isLoading={isDetailPending}
               error={detailError}

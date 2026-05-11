@@ -53,6 +53,7 @@ type storyListFilter struct {
 	Collection string
 	Status     string
 	Query      string
+	Tag        string
 	From       *time.Time
 	To         *time.Time
 	Lang       string
@@ -83,6 +84,7 @@ type storyListItem struct {
 	SourceCount      int                  `json:"source_count"`
 	ArticleCount     int                  `json:"article_count"`
 	Representative   *storyRepresentative `json:"representative,omitempty"`
+	Tags             []db.TagRecord       `json:"tags,omitempty"`
 }
 
 type StoryArticle struct {
@@ -112,6 +114,7 @@ type StoryArticle struct {
 	DedupTitleOverlap    *float64       `json:"dedup_title_overlap,omitempty"`
 	DedupDateConsistency *float64       `json:"dedup_date_consistency,omitempty"`
 	DedupCompositeScore  *float64       `json:"dedup_composite_score,omitempty"`
+	Tags                 []db.TagRecord `json:"tags,omitempty"`
 }
 
 type storyDetail struct {
@@ -344,6 +347,7 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.GET("/me/settings", s.handleGetMySettings)
 	protected.PUT("/me/settings", s.handlePutMySettings)
 	protected.GET("/stats", s.handleStats)
+	protected.GET("/tags", s.handleTags)
 	protected.GET("/collections", s.handleCollections)
 	protected.PATCH("/collections/:collection/settings", s.handleUpdateCollectionSettings)
 	protected.GET("/story-days", s.handleStoryDays)
@@ -357,6 +361,8 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.DELETE("/articles/:article_uuid", s.handleDeleteArticle)
 	protected.PATCH("/articles/:article_uuid", s.handleUpdateArticle)
 	protected.POST("/articles/:article_uuid/restore", s.handleRestoreArticle)
+	protected.POST("/articles/:article_uuid/tags", s.handleAddArticleTag)
+	protected.DELETE("/articles/:article_uuid/tags/:tag_slug", s.handleRemoveArticleTag)
 	protected.GET("/articles/:story_article_uuid/preview", s.handleStoryArticlePreview)
 
 	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
@@ -526,6 +532,7 @@ func (s *Server) handleStories(c echo.Context) error {
 		Collection: normalizeCollection(c.QueryParam("collection")),
 		Status:     strings.TrimSpace(strings.ToLower(c.QueryParam("status"))),
 		Query:      strings.TrimSpace(c.QueryParam("q")),
+		Tag:        db.NormalizeTagSlug(c.QueryParam("tag")),
 		From:       from,
 		To:         to,
 		Lang:       normalizeLanguage(c.QueryParam("lang")),
@@ -556,6 +563,7 @@ func (s *Server) handleStories(c echo.Context) error {
 			"collection": filter.Collection,
 			"status":     filter.Status,
 			"q":          filter.Query,
+			"tag":        filter.Tag,
 			"from":       filter.From,
 			"to":         filter.To,
 			"lang":       filter.Lang,
@@ -878,10 +886,24 @@ WHERE s.deleted_at IS NULL
   AND ($3 = '' OR s.canonical_title ILIKE $3 OR COALESCE(s.canonical_url, '') ILIKE $3)
   AND ($4::timestamptz IS NULL OR s.last_seen_at >= $4)
   AND ($5::timestamptz IS NULL OR s.last_seen_at <= $5)
+  AND (
+	$6 = ''
+	OR EXISTS (
+		SELECT 1
+		FROM news.story_articles tag_sm
+		JOIN news.articles tag_a
+			ON tag_a.article_id = tag_sm.article_id
+			AND tag_a.deleted_at IS NULL
+		JOIN news.article_tags tag_at ON tag_at.article_id = tag_sm.article_id
+		JOIN news.tags tag_t ON tag_t.tag_id = tag_at.tag_id
+		WHERE tag_sm.story_id = s.story_id
+			AND tag_t.slug = $6
+	)
+  )
 `
 
 	var total int64
-	if err := s.pool.QueryRow(ctx, countQuery, filter.Collection, filter.Status, search, filter.From, filter.To).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countQuery, filter.Collection, filter.Status, search, filter.From, filter.To, filter.Tag).Scan(&total); err != nil {
 		return 0, nil, fmt.Errorf("count stories: %w", err)
 	}
 
@@ -935,7 +957,7 @@ LEFT JOIN LATERAL (
 		ON tr.translation_source_id = ts.translation_source_id
 	WHERE ts.source_type = 'story_title'
 		AND ts.source_id = s.story_id
-		AND tr.target_lang = $6
+		AND tr.target_lang = $7
 		AND COALESCE(
 			cs.translation_mode,
 			CASE
@@ -952,9 +974,23 @@ WHERE s.deleted_at IS NULL
   AND ($3 = '' OR s.canonical_title ILIKE $3 OR COALESCE(s.canonical_url, '') ILIKE $3)
   AND ($4::timestamptz IS NULL OR s.last_seen_at >= $4)
   AND ($5::timestamptz IS NULL OR s.last_seen_at <= $5)
+  AND (
+	$6 = ''
+	OR EXISTS (
+		SELECT 1
+		FROM news.story_articles tag_sm
+		JOIN news.articles tag_a
+			ON tag_a.article_id = tag_sm.article_id
+			AND tag_a.deleted_at IS NULL
+		JOIN news.article_tags tag_at ON tag_at.article_id = tag_sm.article_id
+		JOIN news.tags tag_t ON tag_t.tag_id = tag_at.tag_id
+		WHERE tag_sm.story_id = s.story_id
+			AND tag_t.slug = $6
+	)
+  )
 ORDER BY s.last_seen_at DESC, s.story_id DESC
-LIMIT $7
-OFFSET $8
+LIMIT $8
+OFFSET $9
 `
 
 	rows, err := s.pool.Query(
@@ -965,6 +1001,7 @@ OFFSET $8
 		search,
 		filter.From,
 		filter.To,
+		filter.Tag,
 		filter.Lang,
 		filter.PageSize,
 		offset,
@@ -975,6 +1012,7 @@ OFFSET $8
 	defer rows.Close()
 
 	items := make([]storyListItem, 0, filter.PageSize)
+	storyIDs := make([]int64, 0, filter.PageSize)
 	for rows.Next() {
 		var (
 			row             storyListItem
@@ -1019,11 +1057,20 @@ OFFSET $8
 		if filter.Lang != "" && row.TranslatedTitle != nil {
 			row.Title = *row.TranslatedTitle
 		}
+		storyIDs = append(storyIDs, row.StoryID)
 		items = append(items, row)
 	}
 
 	if err := rows.Err(); err != nil {
 		return 0, nil, fmt.Errorf("iterate story rows: %w", err)
+	}
+
+	tagsByStoryID, err := s.pool.ListTagsForStoryIDs(ctx, storyIDs)
+	if err != nil {
+		return 0, nil, err
+	}
+	for idx := range items {
+		items[idx].Tags = tagsByStoryID[items[idx].StoryID]
 	}
 
 	return total, items, nil
@@ -1292,6 +1339,7 @@ ORDER BY sm.matched_at DESC
 	defer rows.Close()
 
 	members := make([]StoryArticle, 0, story.ArticleCount)
+	articleUUIDs := make([]string, 0, story.ArticleCount)
 	for rows.Next() {
 		var (
 			member          StoryArticle
@@ -1344,11 +1392,20 @@ ORDER BY sm.matched_at DESC
 			}
 		}
 
+		articleUUIDs = append(articleUUIDs, member.ArticleUUID)
 		members = append(members, member)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate story articles: %w", err)
+	}
+
+	tagsByArticleUUID, err := s.pool.ListTagsForArticleUUIDs(ctx, articleUUIDs)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range members {
+		members[idx].Tags = tagsByArticleUUID[members[idx].ArticleUUID]
 	}
 
 	return &storyDetail{

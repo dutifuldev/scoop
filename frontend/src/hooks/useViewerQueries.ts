@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import { getCollections, getStoryDays, getStoryDetail, getStories } from "../api";
+import { getCollections, getStoryDays, getStoryDetail, getStories, getTags } from "../api";
 import { extractErrorMessage } from "../lib/viewerFormat";
 import type {
   CollectionSummary,
@@ -10,6 +10,7 @@ import type {
   StoryFilters,
   StoryListItem,
   StoryPagination,
+  Tag,
 } from "../types";
 
 interface UseViewerQueriesArgs {
@@ -20,6 +21,7 @@ interface UseViewerQueriesArgs {
 
 interface UseViewerQueriesResult {
   collections: CollectionSummary[];
+  tags: Tag[];
   dayBuckets: StoryDayBucket[];
   stories: StoryListItem[];
   detail: StoryDetailResponse | null;
@@ -44,6 +46,11 @@ export function useViewerQueries({
     queryFn: () => getCollections(),
   });
 
+  const tagsQuery = useQuery<{ items: Tag[] }>({
+    queryKey: ["tags"],
+    queryFn: () => getTags(),
+  });
+
   const dayBucketsQuery = useQuery<{ items: StoryDayBucket[] }>({
     queryKey: ["story-days", filters.collection],
     queryFn: () => getStoryDays(filters.collection, 45),
@@ -58,6 +65,7 @@ export function useViewerQueries({
       filters.to,
       filters.pageSize,
       filters.lang,
+      filters.tag,
     ],
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
@@ -78,6 +86,7 @@ export function useViewerQueries({
   });
 
   const collections = collectionsQuery.data?.items ?? [];
+  const tags = tagsQuery.data?.items ?? [];
   const dayBuckets = dayBucketsQuery.data?.items ?? [];
   const storyPages = storiesQuery.data?.pages ?? [];
   const stories = useMemo(() => storyPages.flatMap((page) => page.items), [storyPages]);
@@ -104,15 +113,17 @@ export function useViewerQueries({
 
   const globalError = useMemo(() => {
     if (collectionsQuery.error) return extractErrorMessage(collectionsQuery.error);
+    if (tagsQuery.error) return extractErrorMessage(tagsQuery.error);
     if (dayBucketsQuery.error) return extractErrorMessage(dayBucketsQuery.error);
     return "";
-  }, [collectionsQuery.error, dayBucketsQuery.error]);
+  }, [collectionsQuery.error, dayBucketsQuery.error, tagsQuery.error]);
 
   const storiesError = storiesQuery.error ? extractErrorMessage(storiesQuery.error) : "";
   const detailError = detailQuery.error ? extractErrorMessage(detailQuery.error) : "";
 
   return {
     collections,
+    tags,
     dayBuckets,
     stories,
     detail,

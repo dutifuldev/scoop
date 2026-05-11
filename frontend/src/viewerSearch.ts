@@ -63,6 +63,7 @@ export function normalizeViewerSearch(input: Record<string, unknown>): ViewerSea
   const to = normalizeDay(input.to);
   const page = normalizePage(input.page);
   const lang = normalizeLanguage(input.lang);
+  const tag = normalizeString(input.tag);
 
   const search: ViewerSearch = {};
   if (collection) {
@@ -86,6 +87,9 @@ export function normalizeViewerSearch(input: Record<string, unknown>): ViewerSea
   if (lang) {
     search.lang = lang;
   }
+  if (tag) {
+    search.tag = tag;
+  }
 
   return search;
 }
@@ -103,5 +107,6 @@ export function toStoryFilters(search: ViewerSearch): StoryFilters {
     from: search.from || "",
     to: search.to || "",
     lang: search.lang || "",
+    tag: search.tag || "",
   };
 }

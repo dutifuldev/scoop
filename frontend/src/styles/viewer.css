@@ -850,7 +850,7 @@
   }
 
   .app-root-viewer .detail-title {
-    @apply p-0;
+    @apply px-0 pb-0 pt-4;
   }
 
   .app-root-viewer .detail-meta,

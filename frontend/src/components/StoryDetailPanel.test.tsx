@@ -323,7 +323,7 @@ Evidence:
       },
     });
 
-    render(
+    const { container } = render(
       <QueryClientProvider client={queryClient}>
         <StoryDetailPanel
           selectedStoryUUID="story-uuid-1"
@@ -348,9 +348,13 @@ Evidence:
       </QueryClientProvider>,
     );
 
+    expect(screen.queryByLabelText("Article tag search")).not.toBeInTheDocument();
+    expect(container.querySelector(".member-tag-input-shell")).toBeNull();
+
     const [firstAddButton] = await screen.findAllByRole("button", { name: "Add article tag" });
     await user.click(firstAddButton);
     const firstTagInput = screen.getByLabelText("Article tag search");
+    expect(container.querySelector(".member-tag-input-shell")).not.toBeNull();
     await user.type(firstTagInput, "NEEDS");
     expect(firstTagInput).toHaveValue("needs");
 

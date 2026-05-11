@@ -573,56 +573,66 @@ export function StoryDetailPanel({
     const exactTag = addableTags.find((tag) => tag.tag === normalizedInputValue);
     const hasSuggestions = isInputActive && visibleSuggestions.length > 0;
 
+    if (!isInputActive && currentTags.length === 0 && addableTags.length === 0) {
+      return <></>;
+    }
+
+    const renderedCurrentTags = currentTags.map((tag) => {
+      const mutationKey = `${member.article_uuid}:${tag.tag}:remove`;
+      return (
+        <span key={tag.tag} className="tag-chip" style={tagChipStyle(tag)}>
+          {tag.tag}
+          <button
+            type="button"
+            className="tag-chip-remove"
+            onClick={() => {
+              void onRemoveArticleTag(member.article_uuid, tag.tag);
+            }}
+            disabled={tagMutationKey === mutationKey}
+            aria-label={`Remove ${tag.tag} tag`}
+          >
+            <X className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </span>
+      );
+    });
+
     return (
       <div className="member-tag-tools">
-        <div
-          className={`member-tag-input-shell ${isInputActive ? "is-active" : ""}`.trim()}
-          aria-label="Article tags"
-          onMouseDown={() => {
-            if (tagInputBlurTimerRef.current !== null) {
-              window.clearTimeout(tagInputBlurTimerRef.current);
-              tagInputBlurTimerRef.current = null;
-            }
-          }}
-        >
-          {currentTags.map((tag) => {
-            const mutationKey = `${member.article_uuid}:${tag.tag}:remove`;
-            return (
-              <span key={tag.tag} className="tag-chip" style={tagChipStyle(tag)}>
-                {tag.tag}
-                <button
-                  type="button"
-                  className="tag-chip-remove"
-                  onClick={() => {
-                    void onRemoveArticleTag(member.article_uuid, tag.tag);
-                  }}
-                  disabled={tagMutationKey === mutationKey}
-                  aria-label={`Remove ${tag.tag} tag`}
-                >
-                  <X className="h-3 w-3" aria-hidden="true" />
-                </button>
-              </span>
-            );
-          })}
-          {addableTags.length > 0 && !isInputActive ? (
-            <button
-              type="button"
-              className="member-tag-add-button"
-              aria-label="Add article tag"
-              title="Add tag"
-              onClick={() => {
-                if (tagInputBlurTimerRef.current !== null) {
-                  window.clearTimeout(tagInputBlurTimerRef.current);
-                  tagInputBlurTimerRef.current = null;
-                }
-                setActiveTagArticleUUID(member.article_uuid);
-                setTagInputValue("");
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          ) : null}
-          {addableTags.length > 0 && isInputActive ? (
+        {!isInputActive ? (
+          <div className="member-tag-row" aria-label="Article tags">
+            {renderedCurrentTags}
+            {addableTags.length > 0 ? (
+              <button
+                type="button"
+                className="member-tag-add-button"
+                aria-label="Add article tag"
+                title="Add tag"
+                onClick={() => {
+                  if (tagInputBlurTimerRef.current !== null) {
+                    window.clearTimeout(tagInputBlurTimerRef.current);
+                    tagInputBlurTimerRef.current = null;
+                  }
+                  setActiveTagArticleUUID(member.article_uuid);
+                  setTagInputValue("");
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div
+            className="member-tag-input-shell is-active"
+            aria-label="Article tags"
+            onMouseDown={() => {
+              if (tagInputBlurTimerRef.current !== null) {
+                window.clearTimeout(tagInputBlurTimerRef.current);
+                tagInputBlurTimerRef.current = null;
+              }
+            }}
+          >
+            {renderedCurrentTags}
             <div className="member-tag-input-wrap">
               <Input
                 value={normalizedInputValue}
@@ -687,10 +697,8 @@ export function StoryDetailPanel({
                 </div>
               ) : null}
             </div>
-          ) : currentTags.length === 0 ? (
-            <span className="member-tag-empty">No tags available</span>
-          ) : null}
-        </div>
+          </div>
+        )}
       </div>
     );
   }

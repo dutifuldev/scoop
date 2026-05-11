@@ -219,6 +219,44 @@ describe("StoryDetailPanel", () => {
     });
   });
 
+  it("renders markdown links with bare domain targets", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const discordLinkText =
+      "Evidence:\n\n- [Ephemeral watches discussion in Discord](discord.com/channels/1/2/3)";
+
+    vi.mocked(getStoryArticlePreview).mockImplementation(async (storyMemberUUID: string) => ({
+      story_article_uuid: storyMemberUUID,
+      preview_text: storyMemberUUID === "member-1" ? discordLinkText : "Other preview.",
+      source: "normalized_text",
+      char_count: 64,
+      truncated: false,
+    }));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-1"
+          selectedItemUUID=""
+          detail={makeDetail()}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const link = await screen.findByRole("link", {
+      name: "Ephemeral watches discussion in Discord",
+    });
+    expect(link).toHaveAttribute("href", "https://discord.com/channels/1/2/3");
+  });
+
   it("does not request translation for disabled member collections", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {

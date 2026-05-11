@@ -2,11 +2,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getStoryArticlePreview, requestTranslation } from "../api";
+import {
+  addArticleTag,
+  getStoryArticlePreview,
+  removeArticleTag,
+  requestTranslation,
+} from "../api";
 import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { StoryDetailResponse } from "../types";
 
 vi.mock("../api", () => ({
+  addArticleTag: vi.fn(async () => undefined),
   getStoryArticlePreview: vi.fn(async (storyMemberUUID: string, _maxChars = 4000) => ({
     story_article_uuid: storyMemberUUID,
     preview_text: `Fetched preview for ${storyMemberUUID}.\n\nSecond paragraph for ${storyMemberUUID}.`,
@@ -14,6 +20,7 @@ vi.mock("../api", () => ({
     char_count: 64,
     truncated: false,
   })),
+  removeArticleTag: vi.fn(async () => undefined),
   requestTranslation: vi.fn(async () => ({
     stats: { total: 1, translated: 1, cached: 0, skipped: 0 },
   })),
@@ -161,6 +168,7 @@ describe("StoryDetailPanel", () => {
           selectedStoryUUID="story-uuid-1"
           selectedItemUUID=""
           detail={makeDetail()}
+          availableTags={[]}
           activeLang=""
           isLoading={false}
           error=""
@@ -193,6 +201,7 @@ describe("StoryDetailPanel", () => {
           selectedStoryUUID="story-uuid-shared"
           selectedItemUUID=""
           detail={makeDetailWithSharedURL()}
+          availableTags={[]}
           activeLang=""
           isLoading={false}
           error=""
@@ -245,6 +254,7 @@ Evidence:
           selectedStoryUUID="story-uuid-1"
           selectedItemUUID=""
           detail={makeDetail()}
+          availableTags={[]}
           activeLang=""
           isLoading={false}
           error=""
@@ -284,6 +294,7 @@ Evidence:
           selectedStoryUUID="story-uuid-1"
           selectedItemUUID=""
           detail={detail}
+          availableTags={[]}
           activeLang="en"
           isLoading={false}
           error=""
@@ -297,5 +308,7 @@ Evidence:
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
     });
     expect(vi.mocked(requestTranslation)).not.toHaveBeenCalled();
+    expect(vi.mocked(addArticleTag)).not.toHaveBeenCalled();
+    expect(vi.mocked(removeArticleTag)).not.toHaveBeenCalled();
   });
 });

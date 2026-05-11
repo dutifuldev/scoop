@@ -12,6 +12,7 @@ import type {
   StoryFilters,
   StoryArticlePreview,
   StoriesResponse,
+  Tag,
   UserSettings,
 } from "./types";
 import { normalizeLanguageCode } from "./lib/language";
@@ -108,6 +109,15 @@ export async function getCollections(): Promise<{ items: CollectionSummary[] }> 
   return fetchJSend<{ items: CollectionSummary[] }>("/api/v1/collections");
 }
 
+export async function getTags(includeArchived = false): Promise<{ items: Tag[] }> {
+  const params = new URLSearchParams();
+  if (includeArchived) {
+    params.set("include_archived", "true");
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJSend<{ items: Tag[] }>(`/api/v1/tags${suffix}`);
+}
+
 export async function updateCollectionSettings(
   collection: string,
   translationMode: "enabled" | "disabled",
@@ -149,6 +159,9 @@ export async function getStories(filters: StoryFilters): Promise<StoriesResponse
   if (filters.to) {
     params.set("to", filters.to);
   }
+  if (filters.tag) {
+    params.set("tag", filters.tag);
+  }
   appendLang(params, filters.lang);
 
   return fetchJSend<StoriesResponse>(`/api/v1/stories?${params.toString()}`);
@@ -156,6 +169,22 @@ export async function getStories(filters: StoryFilters): Promise<StoriesResponse
 
 export async function getStoryDetail(storyUUID: string, lang = ""): Promise<StoryDetailResponse> {
   return fetchJSend<StoryDetailResponse>(withLang(`/api/v1/stories/${storyUUID}`, lang));
+}
+
+export async function addArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
+  await fetchJSend(`/api/v1/articles/${encodeURIComponent(articleUUID)}/tags`, {
+    method: "POST",
+    bodyJson: { tag_slug: tagSlug },
+  });
+}
+
+export async function removeArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
+  await fetchJSend(
+    `/api/v1/articles/${encodeURIComponent(articleUUID)}/tags/${encodeURIComponent(tagSlug)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function requestTranslation(

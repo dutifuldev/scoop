@@ -82,6 +82,31 @@ type Article struct {
 
 func (Article) TableName() string { return "news.articles" }
 
+// Tag maps news.tags.
+type Tag struct {
+	TagID       int64      `gorm:"column:tag_id;primaryKey;autoIncrement"`
+	TagUUID     string     `gorm:"column:tag_uuid;type:uuid;not null;default:gen_random_uuid();unique"`
+	Slug        string     `gorm:"column:slug;type:text;not null;uniqueIndex:uq_tags_slug"`
+	Name        string     `gorm:"column:name;type:text;not null"`
+	Description *string    `gorm:"column:description;type:text"`
+	Color       *string    `gorm:"column:color;type:text"`
+	ArchivedAt  *time.Time `gorm:"column:archived_at;type:timestamptz"`
+	CreatedAt   time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;type:timestamptz;not null;default:now()"`
+}
+
+func (Tag) TableName() string { return "news.tags" }
+
+// ArticleTag maps news.article_tags.
+type ArticleTag struct {
+	ArticleID       int64     `gorm:"column:article_id;type:bigint;primaryKey"`
+	TagID           int64     `gorm:"column:tag_id;type:bigint;primaryKey"`
+	CreatedByUserID *int64    `gorm:"column:created_by_user_id;type:bigint"`
+	CreatedAt       time.Time `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+}
+
+func (ArticleTag) TableName() string { return "news.article_tags" }
+
 // ArticleEmbedding maps news.article_embeddings.
 type ArticleEmbedding struct {
 	ArticleEmbeddingID   int64     `gorm:"column:article_embedding_id;primaryKey;autoIncrement"`
@@ -312,12 +337,29 @@ type UserSettings struct {
 
 func (UserSettings) TableName() string { return "news.user_settings" }
 
+// AuditEvent maps news.audit_events.
+type AuditEvent struct {
+	EventID          int64           `gorm:"column:event_id;primaryKey;autoIncrement"`
+	ActorUserID      *int64          `gorm:"column:actor_user_id;type:bigint"`
+	Permission       *string         `gorm:"column:permission;type:text"`
+	TemporaryGrantID *int64          `gorm:"column:temporary_grant_id;type:bigint"`
+	Action           string          `gorm:"column:action;type:text;not null"`
+	TargetType       string          `gorm:"column:target_type;type:text;not null"`
+	TargetID         string          `gorm:"column:target_id;type:text;not null"`
+	Details          json.RawMessage `gorm:"column:details;type:jsonb;not null;default:'{}'::jsonb"`
+	CreatedAt        time.Time       `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+}
+
+func (AuditEvent) TableName() string { return "news.audit_events" }
+
 func autoMigrateModels() []any {
 	return []any{
 		&IngestRun{},
 		&SourceCheckpoint{},
 		&RawArrival{},
 		&Article{},
+		&Tag{},
+		&ArticleTag{},
 		&ArticleEmbedding{},
 		&Story{},
 		&StoryArticle{},
@@ -334,5 +376,6 @@ func autoMigrateModels() []any {
 		&User{},
 		&Session{},
 		&UserSettings{},
+		&AuditEvent{},
 	}
 }

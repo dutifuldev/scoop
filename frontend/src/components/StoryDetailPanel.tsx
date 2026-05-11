@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { getStoryArticlePreview, requestTranslation } from "../api";
+import {
+  addArticleTag,
+  getStoryArticlePreview,
+  removeArticleTag,
+  requestTranslation,
+} from "../api";
 import {
   defaultCollectionTranslationMode,
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import { buildMemberSubtitle, formatDateTime } from "../lib/viewerFormat";
-import type { StoryDetailResponse, StoryArticlePreview, StoryArticle } from "../types";
+import type { StoryDetailResponse, StoryArticlePreview, StoryArticle, Tag } from "../types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 interface StoryDetailPanelProps {
   selectedStoryUUID: string;
   selectedItemUUID: string;
   detail: StoryDetailResponse | null;
+  availableTags: Tag[];
   activeLang: string;
   isLoading: boolean;
   error: string;
@@ -183,10 +190,15 @@ function renderTextBlock(paragraph: string, key: string): JSX.Element {
   );
 }
 
+function tagChipStyle(tag: Tag): CSSProperties | undefined {
+  return tag.color ? ({ "--tag-color": tag.color } as CSSProperties) : undefined;
+}
+
 export function StoryDetailPanel({
   selectedStoryUUID,
   selectedItemUUID,
   detail,
+  availableTags,
   activeLang,
   isLoading,
   error,
@@ -210,6 +222,8 @@ export function StoryDetailPanel({
   );
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState("");
+  const [tagMutationKey, setTagMutationKey] = useState("");
+  const [tagMutationError, setTagMutationError] = useState("");
   const translationRequestedRef = useRef<string>("");
   const activeTranslationKeyRef = useRef<string>("");
   const previousStoryUUIDRef = useRef<string>("");
@@ -492,6 +506,108 @@ export function StoryDetailPanel({
       .filter((paragraph) => paragraph.length > 0);
   }
 
+  async function refreshTagsAfterMutation(): Promise<void> {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["story-detail", selectedStoryUUID] }),
+      queryClient.invalidateQueries({ queryKey: ["stories"] }),
+    ]);
+  }
+
+  async function onAddArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
+    if (!articleUUID || !tagSlug || tagSlug === "__add_tag__") {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${tagSlug}:add`;
+    setTagMutationKey(mutationKey);
+    setTagMutationError("");
+    try {
+      await addArticleTag(articleUUID, tagSlug);
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setTagMutationError(err instanceof Error ? err.message : "Failed to add tag.");
+    } finally {
+      setTagMutationKey("");
+    }
+  }
+
+  async function onRemoveArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
+    if (!articleUUID || !tagSlug) {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${tagSlug}:remove`;
+    setTagMutationKey(mutationKey);
+    setTagMutationError("");
+    try {
+      await removeArticleTag(articleUUID, tagSlug);
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setTagMutationError(err instanceof Error ? err.message : "Failed to remove tag.");
+    } finally {
+      setTagMutationKey("");
+    }
+  }
+
+  function renderArticleTags(member: StoryArticle): JSX.Element {
+    const currentTags = member.tags ?? [];
+    const currentSlugs = new Set(currentTags.map((tag) => tag.slug));
+    const addableTags = availableTags.filter((tag) => !currentSlugs.has(tag.slug));
+
+    return (
+      <div className="member-tag-tools">
+        <div className="member-tag-row" aria-label="Article tags">
+          {currentTags.length > 0 ? (
+            currentTags.map((tag) => {
+              const mutationKey = `${member.article_uuid}:${tag.slug}:remove`;
+              return (
+                <span key={tag.slug} className="tag-chip" style={tagChipStyle(tag)}>
+                  {tag.name}
+                  <button
+                    type="button"
+                    className="tag-chip-remove"
+                    onClick={() => {
+                      void onRemoveArticleTag(member.article_uuid, tag.slug);
+                    }}
+                    disabled={tagMutationKey === mutationKey}
+                    aria-label={`Remove ${tag.name} tag`}
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </span>
+              );
+            })
+          ) : (
+            <span className="member-tag-empty">No tags</span>
+          )}
+        </div>
+
+        {addableTags.length > 0 ? (
+          <Select
+            value="__add_tag__"
+            onValueChange={(value) => {
+              void onAddArticleTag(member.article_uuid, value);
+            }}
+          >
+            <SelectTrigger className="member-tag-add-trigger" aria-label="Add article tag">
+              <SelectValue placeholder="Add tag" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__add_tag__" disabled>
+                Add tag
+              </SelectItem>
+              {addableTags.map((tag) => (
+                <SelectItem key={tag.slug} value={tag.slug}>
+                  {tag.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderStoryHeader(): JSX.Element {
     if (!detail) {
       return <></>;
@@ -680,6 +796,7 @@ export function StoryDetailPanel({
                     </>
                   ) : null}
                 </p>
+                {renderArticleTags(representative)}
                 {isExpanded ? (
                   <>
                     {group.canonicalURL ? (
@@ -771,6 +888,7 @@ export function StoryDetailPanel({
                                     </>
                                   ) : null}
                                 </p>
+                                {renderArticleTags(groupMember)}
                               </li>
                             );
                           })}
@@ -800,6 +918,7 @@ export function StoryDetailPanel({
         ) : null}
         {selectedStoryUUID && isLoading ? <p className="muted">Fetching story detail...</p> : null}
         {selectedStoryUUID && !isLoading && error ? <p className="muted">{error}</p> : null}
+        {tagMutationError ? <p className="banner-error">{tagMutationError}</p> : null}
         {selectedStoryUUID && !isLoading && !error && detail ? renderStoryView() : null}
       </div>
     </aside>

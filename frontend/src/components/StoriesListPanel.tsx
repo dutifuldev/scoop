@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { ChevronDown, LogOut, Settings2, X } from "lucide-react";
 
 import { buildFeedMetaText, formatCalendarDay, formatCount } from "../lib/viewerFormat";
-import type { StoryListItem } from "../types";
+import type { StoryListItem, Tag } from "../types";
 import { Button } from "./ui/button";
 import { DayPickerPopover } from "./ui/day-picker-popover";
 import { Input } from "./ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 interface StoriesListPanelProps {
   searchInput: string;
   from: string;
   to: string;
+  selectedTag: string;
+  availableTags: Tag[];
   activeLang: string;
   translatingStoryUUIDs: string[];
   totalItems: number;
@@ -26,6 +30,7 @@ interface StoriesListPanelProps {
   onShowAdvancedSearchChange: (value: boolean) => void;
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
+  onTagChange: (value: string) => void;
   onLoadNextPage: () => void;
   onSelectStory: (storyUUID: string) => void;
   currentUsername: string;
@@ -37,6 +42,8 @@ export function StoriesListPanel({
   searchInput,
   from,
   to,
+  selectedTag,
+  availableTags,
   activeLang,
   translatingStoryUUIDs,
   totalItems,
@@ -52,6 +59,7 @@ export function StoriesListPanel({
   onShowAdvancedSearchChange,
   onFromChange,
   onToChange,
+  onTagChange,
   onLoadNextPage,
   onSelectStory,
   currentUsername,
@@ -196,6 +204,26 @@ export function StoriesListPanel({
                 ) : null}
               </div>
             </label>
+
+            <label className="field field-small">
+              <span>Tag</span>
+              <Select
+                value={selectedTag || "__all_tags__"}
+                onValueChange={(value) => onTagChange(value === "__all_tags__" ? "" : value)}
+              >
+                <SelectTrigger className="advanced-tag-trigger" aria-label="Filter by tag">
+                  <SelectValue placeholder="All tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all_tags__">All tags</SelectItem>
+                  {availableTags.map((tag) => (
+                    <SelectItem key={tag.slug} value={tag.slug}>
+                      {tag.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
           </div>
         ) : null}
       </div>
@@ -252,6 +280,23 @@ export function StoriesListPanel({
                         ) : null}
                       </div>
                     </header>
+                    {story.tags && story.tags.length > 0 ? (
+                      <div className="story-tag-row" aria-label="Story tags">
+                        {story.tags.map((tag) => (
+                          <span
+                            key={tag.slug}
+                            className="tag-chip tag-chip-small"
+                            style={
+                              tag.color
+                                ? ({ "--tag-color": tag.color } as CSSProperties)
+                                : undefined
+                            }
+                          >
+                            {tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     <p className="story-meta">{buildFeedMetaText(story, showTimestampInFeed)}</p>
                   </article>
                 );

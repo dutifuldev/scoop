@@ -12,6 +12,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_arrivals_uuid
 CREATE UNIQUE INDEX IF NOT EXISTS uq_articles_uuid
 	ON news.articles (article_uuid);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_uuid
+	ON news.tags (tag_uuid);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_slug
+	ON news.tags (slug);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_article_embeddings_uuid
 	ON news.article_embeddings (article_embedding_uuid);
 
@@ -56,6 +62,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_arrivals_source_item_payload
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_articles_raw_arrival_id
 	ON news.articles (raw_arrival_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_article_tags_article_tag
+	ON news.article_tags (article_id, tag_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_article_embeddings_article_model
 	ON news.article_embeddings (article_id, model_name, model_version);
@@ -144,6 +153,12 @@ CREATE INDEX IF NOT EXISTS idx_articles_collection_created_at
 CREATE INDEX IF NOT EXISTS idx_articles_collection_created_at_not_deleted
 	ON news.articles (collection, created_at DESC)
 	WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_article_tags_tag_article
+	ON news.article_tags (tag_id, article_id);
+
+CREATE INDEX IF NOT EXISTS idx_tags_archived_slug
+	ON news.tags (archived_at, slug);
 
 CREATE INDEX IF NOT EXISTS idx_article_embeddings_article
 	ON news.article_embeddings (article_id);
@@ -265,6 +280,12 @@ CREATE INDEX IF NOT EXISTS idx_user_settings_preferred_language
 
 CREATE INDEX IF NOT EXISTS idx_collection_settings_translation_mode
 	ON news.collection_settings (translation_mode);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_target_created
+	ON news.audit_events (target_type, target_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor_created
+	ON news.audit_events (actor_user_id, created_at DESC);
 
 DO $$
 BEGIN
@@ -436,6 +457,36 @@ BEGIN
 	) THEN
 		ALTER TABLE news.articles
 			ADD CONSTRAINT articles_collection_nonempty CHECK (length(trim(collection)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'tags_slug_check'
+			AND conrelid = 'news.tags'::regclass
+	) THEN
+		ALTER TABLE news.tags
+			ADD CONSTRAINT tags_slug_check CHECK (slug ~ '^[a-z0-9][a-z0-9_-]{0,63}$');
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'tags_name_check'
+			AND conrelid = 'news.tags'::regclass
+	) THEN
+		ALTER TABLE news.tags
+			ADD CONSTRAINT tags_name_check CHECK (length(trim(name)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'tags_color_check'
+			AND conrelid = 'news.tags'::regclass
+	) THEN
+		ALTER TABLE news.tags
+			ADD CONSTRAINT tags_color_check CHECK (color IS NULL OR color ~ '^#[0-9a-fA-F]{6}$');
 	END IF;
 
 	IF NOT EXISTS (
@@ -837,6 +888,36 @@ BEGIN
 		ALTER TABLE news.collection_settings
 			ADD CONSTRAINT collection_settings_translation_mode_check CHECK (translation_mode IN ('enabled', 'disabled'));
 	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'audit_events_action_check'
+			AND conrelid = 'news.audit_events'::regclass
+	) THEN
+		ALTER TABLE news.audit_events
+			ADD CONSTRAINT audit_events_action_check CHECK (length(trim(action)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'audit_events_target_type_check'
+			AND conrelid = 'news.audit_events'::regclass
+	) THEN
+		ALTER TABLE news.audit_events
+			ADD CONSTRAINT audit_events_target_type_check CHECK (length(trim(target_type)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'audit_events_target_id_check'
+			AND conrelid = 'news.audit_events'::regclass
+	) THEN
+		ALTER TABLE news.audit_events
+			ADD CONSTRAINT audit_events_target_id_check CHECK (length(trim(target_id)) > 0);
+	END IF;
 END
 $$;
 
@@ -920,6 +1001,45 @@ BEGIN
 			FOREIGN KEY (article_id)
 			REFERENCES news.articles(article_id)
 			ON DELETE CASCADE;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_tags_article_id_fkey'
+			AND conrelid = 'news.article_tags'::regclass
+	) THEN
+		ALTER TABLE news.article_tags
+			ADD CONSTRAINT article_tags_article_id_fkey
+			FOREIGN KEY (article_id)
+			REFERENCES news.articles(article_id)
+			ON DELETE CASCADE;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_tags_tag_id_fkey'
+			AND conrelid = 'news.article_tags'::regclass
+	) THEN
+		ALTER TABLE news.article_tags
+			ADD CONSTRAINT article_tags_tag_id_fkey
+			FOREIGN KEY (tag_id)
+			REFERENCES news.tags(tag_id)
+			ON DELETE RESTRICT;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_tags_created_by_user_id_fkey'
+			AND conrelid = 'news.article_tags'::regclass
+	) THEN
+		ALTER TABLE news.article_tags
+			ADD CONSTRAINT article_tags_created_by_user_id_fkey
+			FOREIGN KEY (created_by_user_id)
+			REFERENCES news.users(user_id)
+			ON DELETE SET NULL;
 	END IF;
 
 	IF NOT EXISTS (
@@ -1129,6 +1249,19 @@ BEGIN
 			REFERENCES news.users(user_id)
 			ON DELETE CASCADE;
 	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'audit_events_actor_user_id_fkey'
+			AND conrelid = 'news.audit_events'::regclass
+	) THEN
+		ALTER TABLE news.audit_events
+			ADD CONSTRAINT audit_events_actor_user_id_fkey
+			FOREIGN KEY (actor_user_id)
+			REFERENCES news.users(user_id)
+			ON DELETE SET NULL;
+	END IF;
 END
 $$;
 
@@ -1153,6 +1286,17 @@ BEGIN
 	) THEN
 		CREATE TRIGGER trg_articles_touch_updated_at
 		BEFORE UPDATE ON news.articles
+		FOR EACH ROW EXECUTE FUNCTION news.touch_updated_at();
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_trigger
+		WHERE tgname = 'trg_tags_touch_updated_at'
+			AND tgrelid = 'news.tags'::regclass
+	) THEN
+		CREATE TRIGGER trg_tags_touch_updated_at
+		BEFORE UPDATE ON news.tags
 		FOR EACH ROW EXECUTE FUNCTION news.touch_updated_at();
 	END IF;
 

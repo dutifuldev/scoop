@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { ChevronDown, ChevronRight, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -530,6 +530,7 @@ export function StoryDetailPanel({
     try {
       await addArticleTag(articleUUID, tagSlug);
       setTagInputValue("");
+      setActiveTagArticleUUID("");
       await refreshTagsAfterMutation();
     } catch (err) {
       setTagMutationError(err instanceof Error ? err.message : "Failed to add tag.");
@@ -599,7 +600,25 @@ export function StoryDetailPanel({
               </span>
             );
           })}
-          {addableTags.length > 0 ? (
+          {addableTags.length > 0 && !isInputActive ? (
+            <button
+              type="button"
+              className="member-tag-add-button"
+              aria-label="Add article tag"
+              title="Add tag"
+              onClick={() => {
+                if (tagInputBlurTimerRef.current !== null) {
+                  window.clearTimeout(tagInputBlurTimerRef.current);
+                  tagInputBlurTimerRef.current = null;
+                }
+                setActiveTagArticleUUID(member.article_uuid);
+                setTagInputValue("");
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          ) : null}
+          {addableTags.length > 0 && isInputActive ? (
             <div className="member-tag-input-wrap">
               <Input
                 value={normalizedInputValue}
@@ -634,9 +653,10 @@ export function StoryDetailPanel({
                   }
                 }}
                 className="member-tag-input"
-                placeholder={currentTags.length > 0 ? "Add tag" : "Add tag"}
-                aria-label="Add article tag"
+                placeholder="Add tag"
+                aria-label="Article tag search"
                 autoComplete="off"
+                autoFocus
                 spellCheck={false}
               />
               {hasSuggestions ? (

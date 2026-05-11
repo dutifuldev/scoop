@@ -346,8 +346,9 @@ Evidence:
       </QueryClientProvider>,
     );
 
-    const [firstTagInput] = await screen.findAllByLabelText("Add article tag");
-    await user.click(firstTagInput);
+    const [firstAddButton] = await screen.findAllByRole("button", { name: "Add article tag" });
+    await user.click(firstAddButton);
+    const firstTagInput = screen.getByLabelText("Article tag search");
     await user.type(firstTagInput, "NEEDS");
     expect(firstTagInput).toHaveValue("needs");
 

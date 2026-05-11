@@ -270,6 +270,7 @@ Evidence:
       name: "Ephemeral watches discussion in Discord",
     });
     expect(link).toHaveAttribute("href", "https://discord.com/channels/1/2/3");
+    expect(link.querySelector("img.discord-link-icon")).not.toBeNull();
     expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
   });
 

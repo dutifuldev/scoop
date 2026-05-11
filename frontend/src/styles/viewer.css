@@ -596,7 +596,7 @@
 
   .inline-rich-link,
   .inline-discord-link {
-    @apply rounded-[6px] px-1 py-0.5 font-medium text-brand-400 underline decoration-brand-400/40 underline-offset-2 transition;
+    @apply inline-flex items-center gap-1 rounded-[6px] px-1 py-0.5 font-medium text-brand-400 underline decoration-brand-400/40 underline-offset-2 transition;
   }
 
   .inline-rich-link:hover,
@@ -608,17 +608,16 @@
     @apply border border-brand-500/30 bg-brand-500/10 no-underline;
   }
 
+  .discord-link-icon {
+    @apply h-3.5 w-3.5 shrink-0;
+  }
+
   .member-expanded-url {
-    @apply mt-2 inline-flex max-w-full items-center rounded-[8px] border border-brand-500/30 bg-brand-500/10 px-2.5 py-1.5 text-[0.86rem] font-semibold leading-tight text-brand-400 no-underline transition;
+    @apply mt-2 inline-flex max-w-full items-center gap-1.5 rounded-[8px] border border-brand-500/30 bg-brand-500/10 px-2.5 py-1.5 text-[0.86rem] font-semibold leading-tight text-brand-400 no-underline transition;
   }
 
   .member-expanded-url:hover {
     @apply bg-brand-500/15 text-panel-100;
-  }
-
-  .member-expanded-url-discord::before {
-    content: "↗";
-    @apply mr-1.5 text-panel-400;
   }
 
   .member-expanded-content {

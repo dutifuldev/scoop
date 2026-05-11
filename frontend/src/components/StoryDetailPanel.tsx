@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import discordLogoURL from "../assets/discord.svg";
 import {
   addArticleTag,
   getStoryArticlePreview,
@@ -134,6 +135,9 @@ function renderInlineLinks(text: string): ReactNode[] {
         rel="noreferrer"
         title={url}
       >
+        {isDiscordMessage ? (
+          <img className="discord-link-icon" src={discordLogoURL} alt="" aria-hidden="true" />
+        ) : null}
         {markdownLabel || labelForURL(url)}
       </a>,
     );
@@ -891,6 +895,14 @@ export function StoryDetailPanel({
                         rel="noreferrer"
                         title={group.canonicalURL}
                       >
+                        {discordMessagePattern.test(group.canonicalURL) ? (
+                          <img
+                            className="discord-link-icon"
+                            src={discordLogoURL}
+                            alt=""
+                            aria-hidden="true"
+                          />
+                        ) : null}
                         {labelForURL(group.canonicalURL)}
                       </a>
                     ) : null}

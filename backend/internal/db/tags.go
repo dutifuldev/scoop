@@ -3,10 +3,14 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var tagPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -80,41 +84,20 @@ func normalizeOptionalColor(value *string) (*string, error) {
 }
 
 func (p *Pool) ListTags(ctx context.Context, includeArchived bool) ([]TagRecord, error) {
-	const q = `
-SELECT tag_id, tag_uuid::text, slug, name, description, color, archived_at, created_at, updated_at
-FROM news.tags
-WHERE $1 OR archived_at IS NULL
-ORDER BY archived_at NULLS FIRST, slug
-`
-	rows, err := p.Query(ctx, q, includeArchived)
-	if err != nil {
+	var tags []Tag
+	query := p.gdb.WithContext(ctx).Model(&Tag{})
+	if !includeArchived {
+		query = query.Where("archived_at IS NULL")
+	}
+	if err := query.Order("archived_at NULLS FIRST, slug").Find(&tags).Error; err != nil {
 		return nil, fmt.Errorf("query tags: %w", err)
 	}
-	defer rows.Close()
 
-	tags := make([]TagRecord, 0, 32)
-	for rows.Next() {
-		var tag TagRecord
-		if err := rows.Scan(
-			&tag.TagID,
-			&tag.TagUUID,
-			&tag.Slug,
-			&tag.Name,
-			&tag.Description,
-			&tag.Color,
-			&tag.ArchivedAt,
-			&tag.CreatedAt,
-			&tag.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan tag: %w", err)
-		}
-		tag.Tag = tag.Slug
-		tags = append(tags, tag)
+	records := make([]TagRecord, 0, len(tags))
+	for _, tag := range tags {
+		records = append(records, tagModelToRecord(tag))
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tags: %w", err)
-	}
-	return tags, nil
+	return records, nil
 }
 
 func (p *Pool) CreateTag(ctx context.Context, opts UpsertTagOptions, now time.Time) (*TagRecord, error) {
@@ -128,30 +111,31 @@ func (p *Pool) CreateTag(ctx context.Context, opts UpsertTagOptions, now time.Ti
 		return nil, err
 	}
 
-	tx, err := p.BeginTx(ctx, TxOptions{})
+	var tag Tag
+	err = p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		tag = Tag{
+			Slug:        slug,
+			Name:        slug,
+			Description: description,
+			Color:       color,
+			CreatedAt:   now.UTC(),
+			UpdatedAt:   now.UTC(),
+		}
+		if err := tx.Create(&tag).Error; err != nil {
+			return fmt.Errorf("create tag: %w", err)
+		}
+		if err := insertAuditEventGORM(ctx, tx, nil, "tag.create", "tag", tag.Slug, map[string]any{
+			"tag": tag.Slug,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	const q = `
-INSERT INTO news.tags (slug, name, description, color, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $5)
-RETURNING tag_id, tag_uuid::text, slug, name, description, color, archived_at, created_at, updated_at
-`
-	tag, err := scanTag(tx.QueryRow(ctx, q, slug, slug, description, color, now.UTC()))
-	if err != nil {
-		return nil, fmt.Errorf("create tag: %w", err)
-	}
-	if err := insertAuditEvent(ctx, tx, nil, "tag.create", "tag", tag.Slug, map[string]any{
-		"tag": tag.Slug,
-	}); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit create tag: %w", err)
-	}
-	return tag, nil
+	record := tagModelToRecord(tag)
+	return &record, nil
 }
 
 func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions, now time.Time) (*TagRecord, error) {
@@ -160,9 +144,7 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 		return nil, err
 	}
 
-	set := make([]string, 0, 5)
-	args := []any{normalizedSlug}
-	argPos := 2
+	updates := map[string]any{}
 	details := map[string]any{"old_tag": normalizedSlug}
 
 	if opts.NewSlug != nil {
@@ -170,64 +152,52 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 		if err := ValidateTagSlug(newSlug); err != nil {
 			return nil, err
 		}
-		set = append(set, fmt.Sprintf("slug = $%d", argPos))
-		args = append(args, newSlug)
+		updates["slug"] = newSlug
+		updates["name"] = newSlug
 		details["new_tag"] = newSlug
-		argPos++
-		set = append(set, fmt.Sprintf("name = $%d", argPos))
-		args = append(args, newSlug)
-		argPos++
 	}
 	if opts.Description != nil {
 		description := normalizeOptionalString(opts.Description)
-		set = append(set, fmt.Sprintf("description = $%d", argPos))
-		args = append(args, description)
+		updates["description"] = description
 		details["description"] = description
-		argPos++
 	}
 	if opts.Color != nil {
 		color, err := normalizeOptionalColor(opts.Color)
 		if err != nil {
 			return nil, err
 		}
-		set = append(set, fmt.Sprintf("color = $%d", argPos))
-		args = append(args, color)
+		updates["color"] = color
 		details["color"] = color
-		argPos++
 	}
-	if len(set) == 0 {
+	if len(updates) == 0 {
 		return nil, fmt.Errorf("at least one update field is required")
 	}
+	updates["updated_at"] = now.UTC()
 
-	set = append(set, fmt.Sprintf("updated_at = $%d", argPos))
-	args = append(args, now.UTC())
-
-	tx, err := p.BeginTx(ctx, TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	q := fmt.Sprintf(`
-UPDATE news.tags
-SET %s
-WHERE slug = $1
-RETURNING tag_id, tag_uuid::text, slug, name, description, color, archived_at, created_at, updated_at
-`, strings.Join(set, ", "))
-	tag, err := scanTag(tx.QueryRow(ctx, q, args...))
-	if err != nil {
-		if IsNoRows(err) {
-			return nil, ErrNoRows
+	var tag Tag
+	err := p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoRows
+			}
+			return fmt.Errorf("query tag: %w", err)
 		}
-		return nil, fmt.Errorf("update tag: %w", err)
-	}
-	if err := insertAuditEvent(ctx, tx, nil, "tag.update", "tag", tag.Slug, details); err != nil {
+		if err := tx.Model(&tag).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update tag: %w", err)
+		}
+		if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
+			return fmt.Errorf("query updated tag: %w", err)
+		}
+		if err := insertAuditEventGORM(ctx, tx, nil, "tag.update", "tag", tag.Slug, details); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit update tag: %w", err)
-	}
-	return tag, nil
+	record := tagModelToRecord(tag)
+	return &record, nil
 }
 
 func (p *Pool) SetTagArchived(ctx context.Context, slug string, archived bool, now time.Time) (*TagRecord, error) {
@@ -236,40 +206,46 @@ func (p *Pool) SetTagArchived(ctx context.Context, slug string, archived bool, n
 		return nil, err
 	}
 
-	tx, err := p.BeginTx(ctx, TxOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	const q = `
-UPDATE news.tags
-SET archived_at = CASE WHEN $2 THEN $3 ELSE NULL END,
-	updated_at = $3
-WHERE slug = $1
-RETURNING tag_id, tag_uuid::text, slug, name, description, color, archived_at, created_at, updated_at
-`
-	tag, err := scanTag(tx.QueryRow(ctx, q, normalizedSlug, archived, now.UTC()))
-	if err != nil {
-		if IsNoRows(err) {
-			return nil, ErrNoRows
-		}
-		return nil, fmt.Errorf("archive tag: %w", err)
-	}
 	action := "tag.unarchive"
 	if archived {
 		action = "tag.archive"
 	}
-	if err := insertAuditEvent(ctx, tx, nil, action, "tag", tag.Slug, map[string]any{
-		"tag":      tag.Slug,
-		"archived": archived,
-	}); err != nil {
+
+	var tag Tag
+	err := p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoRows
+			}
+			return fmt.Errorf("query tag: %w", err)
+		}
+		var archivedAt *time.Time
+		if archived {
+			value := now.UTC()
+			archivedAt = &value
+		}
+		if err := tx.Model(&tag).Updates(map[string]any{
+			"archived_at": archivedAt,
+			"updated_at":  now.UTC(),
+		}).Error; err != nil {
+			return fmt.Errorf("archive tag: %w", err)
+		}
+		if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
+			return fmt.Errorf("query archived tag: %w", err)
+		}
+		if err := insertAuditEventGORM(ctx, tx, nil, action, "tag", tag.Slug, map[string]any{
+			"tag":      tag.Slug,
+			"archived": archived,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit archive tag: %w", err)
-	}
-	return tag, nil
+	record := tagModelToRecord(tag)
+	return &record, nil
 }
 
 func (p *Pool) DeleteTag(ctx context.Context, slug string) error {
@@ -278,38 +254,31 @@ func (p *Pool) DeleteTag(ctx context.Context, slug string) error {
 		return err
 	}
 
-	tx, err := p.BeginTx(ctx, TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	var tagID int64
-	if err := tx.QueryRow(ctx, `SELECT tag_id FROM news.tags WHERE slug = $1`, normalizedSlug).Scan(&tagID); err != nil {
-		if IsNoRows(err) {
-			return ErrNoRows
+	return p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tag Tag
+		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNoRows
+			}
+			return fmt.Errorf("query tag: %w", err)
 		}
-		return fmt.Errorf("query tag: %w", err)
-	}
-	var usageCount int64
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM news.article_tags WHERE tag_id = $1`, tagID).Scan(&usageCount); err != nil {
-		return fmt.Errorf("count tag usage: %w", err)
-	}
-	if usageCount > 0 {
-		return fmt.Errorf("tag %q is attached to %d articles; archive it instead", normalizedSlug, usageCount)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM news.tags WHERE tag_id = $1`, tagID); err != nil {
-		return fmt.Errorf("delete tag: %w", err)
-	}
-	if err := insertAuditEvent(ctx, tx, nil, "tag.delete", "tag", normalizedSlug, map[string]any{
-		"tag": normalizedSlug,
-	}); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit delete tag: %w", err)
-	}
-	return nil
+		var usageCount int64
+		if err := tx.Model(&ArticleTag{}).Where("tag_id = ?", tag.TagID).Count(&usageCount).Error; err != nil {
+			return fmt.Errorf("count tag usage: %w", err)
+		}
+		if usageCount > 0 {
+			return fmt.Errorf("tag %q is attached to %d articles; archive it instead", normalizedSlug, usageCount)
+		}
+		if err := tx.Delete(&tag).Error; err != nil {
+			return fmt.Errorf("delete tag: %w", err)
+		}
+		if err := insertAuditEventGORM(ctx, tx, nil, "tag.delete", "tag", normalizedSlug, map[string]any{
+			"tag": normalizedSlug,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (p *Pool) AddArticleTag(ctx context.Context, articleUUID string, slug string, actorUserID *int64, now time.Time) error {
@@ -318,42 +287,38 @@ func (p *Pool) AddArticleTag(ctx context.Context, articleUUID string, slug strin
 		return err
 	}
 
-	tx, err := p.BeginTx(ctx, TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	articleID, normalizedArticleUUID, err := lookupArticleIDByUUID(ctx, tx, articleUUID)
-	if err != nil {
-		return err
-	}
-	tagID, err := lookupTagIDBySlug(ctx, tx, normalizedSlug, true)
-	if err != nil {
-		return err
-	}
-
-	const q = `
-INSERT INTO news.article_tags (article_id, tag_id, created_by_user_id, created_at)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (article_id, tag_id) DO NOTHING
-`
-	tag, err := tx.Exec(ctx, q, articleID, tagID, actorUserID, now.UTC())
-	if err != nil {
-		return fmt.Errorf("add article tag: %w", err)
-	}
-	if tag.RowsAffected() > 0 {
-		if err := insertAuditEvent(ctx, tx, actorUserID, "article_tag.add", "article", normalizedArticleUUID, map[string]any{
-			"article_uuid": normalizedArticleUUID,
-			"tag":          normalizedSlug,
-		}); err != nil {
+	return p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		article, err := lookupArticleByUUIDGORM(ctx, tx, articleUUID)
+		if err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit add article tag: %w", err)
-	}
-	return nil
+		tag, err := lookupTagBySlugGORM(ctx, tx, normalizedSlug, true)
+		if err != nil {
+			return err
+		}
+		articleTag := ArticleTag{
+			ArticleID:       article.ArticleID,
+			TagID:           tag.TagID,
+			CreatedByUserID: actorUserID,
+			CreatedAt:       now.UTC(),
+		}
+		res := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "article_id"}, {Name: "tag_id"}},
+			DoNothing: true,
+		}).Create(&articleTag)
+		if res.Error != nil {
+			return fmt.Errorf("add article tag: %w", res.Error)
+		}
+		if res.RowsAffected > 0 {
+			if err := insertAuditEventGORM(ctx, tx, actorUserID, "article_tag.add", "article", article.ArticleUUID, map[string]any{
+				"article_uuid": article.ArticleUUID,
+				"tag":          normalizedSlug,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (p *Pool) RemoveArticleTag(ctx context.Context, articleUUID string, slug string, actorUserID *int64) error {
@@ -362,220 +327,199 @@ func (p *Pool) RemoveArticleTag(ctx context.Context, articleUUID string, slug st
 		return err
 	}
 
-	tx, err := p.BeginTx(ctx, TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	articleID, normalizedArticleUUID, err := lookupArticleIDByUUID(ctx, tx, articleUUID)
-	if err != nil {
-		return err
-	}
-	tagID, err := lookupTagIDBySlug(ctx, tx, normalizedSlug, false)
-	if err != nil {
-		return err
-	}
-
-	tag, err := tx.Exec(ctx, `DELETE FROM news.article_tags WHERE article_id = $1 AND tag_id = $2`, articleID, tagID)
-	if err != nil {
-		return fmt.Errorf("remove article tag: %w", err)
-	}
-	if tag.RowsAffected() > 0 {
-		if err := insertAuditEvent(ctx, tx, actorUserID, "article_tag.remove", "article", normalizedArticleUUID, map[string]any{
-			"article_uuid": normalizedArticleUUID,
-			"tag":          normalizedSlug,
-		}); err != nil {
+	return p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		article, err := lookupArticleByUUIDGORM(ctx, tx, articleUUID)
+		if err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit remove article tag: %w", err)
-	}
-	return nil
+		tag, err := lookupTagBySlugGORM(ctx, tx, normalizedSlug, false)
+		if err != nil {
+			return err
+		}
+		res := tx.Where("article_id = ? AND tag_id = ?", article.ArticleID, tag.TagID).Delete(&ArticleTag{})
+		if res.Error != nil {
+			return fmt.Errorf("remove article tag: %w", res.Error)
+		}
+		if res.RowsAffected > 0 {
+			if err := insertAuditEventGORM(ctx, tx, actorUserID, "article_tag.remove", "article", article.ArticleUUID, map[string]any{
+				"article_uuid": article.ArticleUUID,
+				"tag":          normalizedSlug,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (p *Pool) ListTagsForArticleUUIDs(ctx context.Context, articleUUIDs []string) (map[string][]TagRecord, error) {
-	placeholders, args := uuidPlaceholders(articleUUIDs)
-	if len(args) == 0 {
+	articleUUIDs = uniqueTrimmedStrings(articleUUIDs)
+	if len(articleUUIDs) == 0 {
 		return map[string][]TagRecord{}, nil
 	}
-	q := fmt.Sprintf(`
-SELECT a.article_uuid::text, t.tag_id, t.tag_uuid::text, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at
-FROM news.articles a
-JOIN news.article_tags at ON at.article_id = a.article_id
-JOIN news.tags t ON t.tag_id = at.tag_id
-WHERE a.article_uuid IN (%s)
-  AND a.deleted_at IS NULL
-ORDER BY t.slug
-`, placeholders)
-	return scanTagMapByArticleUUID(ctx, p, q, args...)
+	var rows []articleTagRow
+	uuidCondition, uuidArgs := uuidInCondition("a.article_uuid", articleUUIDs)
+	if err := p.gdb.WithContext(ctx).
+		Table("news.articles AS a").
+		Select("a.article_uuid::text AS article_uuid, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at").
+		Joins("JOIN news.article_tags AS at ON at.article_id = a.article_id").
+		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
+		Where(uuidCondition, uuidArgs...).
+		Where("a.deleted_at IS NULL").
+		Order("t.slug").
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query article tags: %w", err)
+	}
+	result := make(map[string][]TagRecord)
+	for _, row := range rows {
+		result[row.ArticleUUID] = append(result[row.ArticleUUID], row.tagRecord())
+	}
+	return result, nil
 }
 
 func (p *Pool) ListTagsForStoryIDs(ctx context.Context, storyIDs []int64) (map[int64][]TagRecord, error) {
-	placeholders, args := int64Placeholders(storyIDs)
-	if len(args) == 0 {
+	storyIDs = uniquePositiveInt64s(storyIDs)
+	if len(storyIDs) == 0 {
 		return map[int64][]TagRecord{}, nil
 	}
-	q := fmt.Sprintf(`
-SELECT DISTINCT sm.story_id, t.tag_id, t.tag_uuid::text, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at
-FROM news.story_articles sm
-JOIN news.articles a
-  ON a.article_id = sm.article_id
-  AND a.deleted_at IS NULL
-JOIN news.article_tags at ON at.article_id = sm.article_id
-JOIN news.tags t ON t.tag_id = at.tag_id
-WHERE sm.story_id IN (%s)
-ORDER BY sm.story_id, t.slug
-`, placeholders)
-	rows, err := p.Query(ctx, q, args...)
-	if err != nil {
+	var rows []storyTagRow
+	if err := p.gdb.WithContext(ctx).
+		Table("news.story_articles AS sm").
+		Distinct("sm.story_id, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at").
+		Joins("JOIN news.articles AS a ON a.article_id = sm.article_id AND a.deleted_at IS NULL").
+		Joins("JOIN news.article_tags AS at ON at.article_id = sm.article_id").
+		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
+		Where("sm.story_id IN ?", storyIDs).
+		Order("sm.story_id, t.slug").
+		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query story tags: %w", err)
 	}
-	defer rows.Close()
-
 	result := make(map[int64][]TagRecord, len(storyIDs))
-	for rows.Next() {
-		var storyID int64
-		tag, err := scanTagFromRows(rows, &storyID)
-		if err != nil {
-			return nil, err
-		}
-		result[storyID] = append(result[storyID], tag)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate story tags: %w", err)
+	for _, row := range rows {
+		result[row.StoryID] = append(result[row.StoryID], row.tagRecord())
 	}
 	return result, nil
 }
 
-func scanTag(row *Row) (*TagRecord, error) {
-	var tag TagRecord
-	if err := row.Scan(
-		&tag.TagID,
-		&tag.TagUUID,
-		&tag.Slug,
-		&tag.Name,
-		&tag.Description,
-		&tag.Color,
-		&tag.ArchivedAt,
-		&tag.CreatedAt,
-		&tag.UpdatedAt,
-	); err != nil {
-		return nil, err
+func lookupArticleByUUIDGORM(ctx context.Context, tx *gorm.DB, articleUUID string) (Article, error) {
+	trimmedUUID := strings.TrimSpace(articleUUID)
+	if trimmedUUID == "" {
+		return Article{}, fmt.Errorf("article UUID is required")
 	}
-	tag.Tag = tag.Slug
-	return &tag, nil
+	var article Article
+	if err := tx.WithContext(ctx).Where("article_uuid = ?::uuid AND deleted_at IS NULL", trimmedUUID).First(&article).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Article{}, ErrNoRows
+		}
+		return Article{}, fmt.Errorf("query article: %w", err)
+	}
+	return article, nil
 }
 
-func scanTagFromRows(rows *Rows, prefixDest ...any) (TagRecord, error) {
-	dest := make([]any, 0, len(prefixDest)+9)
-	dest = append(dest, prefixDest...)
-	var tag TagRecord
-	dest = append(dest,
-		&tag.TagID,
-		&tag.TagUUID,
-		&tag.Slug,
-		&tag.Name,
-		&tag.Description,
-		&tag.Color,
-		&tag.ArchivedAt,
-		&tag.CreatedAt,
-		&tag.UpdatedAt,
-	)
-	if err := rows.Scan(dest...); err != nil {
-		return TagRecord{}, fmt.Errorf("scan tag row: %w", err)
+func lookupTagBySlugGORM(ctx context.Context, tx *gorm.DB, slug string, requireActive bool) (Tag, error) {
+	query := tx.WithContext(ctx).Where("slug = ?", slug)
+	if requireActive {
+		query = query.Where("archived_at IS NULL")
 	}
-	tag.Tag = tag.Slug
+	var tag Tag
+	if err := query.First(&tag).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Tag{}, ErrNoRows
+		}
+		return Tag{}, fmt.Errorf("query tag: %w", err)
+	}
 	return tag, nil
 }
 
-func scanTagMapByArticleUUID(ctx context.Context, p *Pool, query string, args ...any) (map[string][]TagRecord, error) {
-	rows, err := p.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query article tags: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]TagRecord)
-	for rows.Next() {
-		var articleUUID string
-		tag, err := scanTagFromRows(rows, &articleUUID)
-		if err != nil {
-			return nil, err
-		}
-		result[articleUUID] = append(result[articleUUID], tag)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate article tags: %w", err)
-	}
-	return result, nil
-}
-
-func lookupArticleIDByUUID(ctx context.Context, tx Tx, articleUUID string) (int64, string, error) {
-	trimmedUUID := strings.TrimSpace(articleUUID)
-	if trimmedUUID == "" {
-		return 0, "", fmt.Errorf("article UUID is required")
-	}
-	var (
-		articleID     int64
-		storedArticle string
-	)
-	const q = `
-SELECT article_id, article_uuid::text
-FROM news.articles
-WHERE article_uuid = $1::uuid
-  AND deleted_at IS NULL
-LIMIT 1
-`
-	if err := tx.QueryRow(ctx, q, trimmedUUID).Scan(&articleID, &storedArticle); err != nil {
-		if IsNoRows(err) {
-			return 0, "", ErrNoRows
-		}
-		return 0, "", fmt.Errorf("query article: %w", err)
-	}
-	return articleID, storedArticle, nil
-}
-
-func lookupTagIDBySlug(ctx context.Context, tx Tx, slug string, requireActive bool) (int64, error) {
-	condition := ""
-	if requireActive {
-		condition = "AND archived_at IS NULL"
-	}
-	q := fmt.Sprintf(`
-SELECT tag_id
-FROM news.tags
-WHERE slug = $1
-%s
-LIMIT 1
-`, condition)
-	var tagID int64
-	if err := tx.QueryRow(ctx, q, slug).Scan(&tagID); err != nil {
-		if IsNoRows(err) {
-			return 0, ErrNoRows
-		}
-		return 0, fmt.Errorf("query tag: %w", err)
-	}
-	return tagID, nil
-}
-
-func insertAuditEvent(ctx context.Context, tx Tx, actorUserID *int64, action string, targetType string, targetID string, details map[string]any) error {
+func insertAuditEventGORM(ctx context.Context, tx *gorm.DB, actorUserID *int64, action string, targetType string, targetID string, details map[string]any) error {
 	rawDetails, err := json.Marshal(details)
 	if err != nil {
 		return fmt.Errorf("marshal audit details: %w", err)
 	}
-	const q = `
-INSERT INTO news.audit_events (actor_user_id, action, target_type, target_id, details, created_at)
-VALUES ($1, $2, $3, $4, $5, now())
-`
-	if _, err := tx.Exec(ctx, q, actorUserID, action, targetType, targetID, rawDetails); err != nil {
+	event := AuditEvent{
+		ActorUserID: actorUserID,
+		Action:      action,
+		TargetType:  targetType,
+		TargetID:    targetID,
+		Details:     rawDetails,
+	}
+	if err := tx.WithContext(ctx).Create(&event).Error; err != nil {
 		return fmt.Errorf("insert audit event: %w", err)
 	}
 	return nil
 }
 
-func uuidPlaceholders(values []string) (string, []any) {
-	args := make([]any, 0, len(values))
+type articleTagRow struct {
+	ArticleUUID string
+	TagID       int64
+	TagUUID     string
+	Slug        string
+	Name        string
+	Description *string
+	Color       *string
+	ArchivedAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (r articleTagRow) tagRecord() TagRecord {
+	return tagModelToRecord(Tag{
+		TagID:       r.TagID,
+		TagUUID:     r.TagUUID,
+		Slug:        r.Slug,
+		Name:        r.Name,
+		Description: r.Description,
+		Color:       r.Color,
+		ArchivedAt:  r.ArchivedAt,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
+	})
+}
+
+type storyTagRow struct {
+	StoryID     int64
+	TagID       int64
+	TagUUID     string
+	Slug        string
+	Name        string
+	Description *string
+	Color       *string
+	ArchivedAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (r storyTagRow) tagRecord() TagRecord {
+	return tagModelToRecord(Tag{
+		TagID:       r.TagID,
+		TagUUID:     r.TagUUID,
+		Slug:        r.Slug,
+		Name:        r.Name,
+		Description: r.Description,
+		Color:       r.Color,
+		ArchivedAt:  r.ArchivedAt,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
+	})
+}
+
+func tagModelToRecord(tag Tag) TagRecord {
+	return TagRecord{
+		TagID:       tag.TagID,
+		TagUUID:     tag.TagUUID,
+		Tag:         tag.Slug,
+		Slug:        tag.Slug,
+		Name:        tag.Name,
+		Description: tag.Description,
+		Color:       tag.Color,
+		ArchivedAt:  tag.ArchivedAt,
+		CreatedAt:   tag.CreatedAt,
+		UpdatedAt:   tag.UpdatedAt,
+	}
+}
+
+func uniqueTrimmedStrings(values []string) []string {
+	result := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
@@ -586,13 +530,23 @@ func uuidPlaceholders(values []string) (string, []any) {
 			continue
 		}
 		seen[trimmed] = struct{}{}
-		args = append(args, trimmed)
+		result = append(result, trimmed)
 	}
-	return placeholders(len(args), "::uuid"), args
+	return result
 }
 
-func int64Placeholders(values []int64) (string, []any) {
+func uuidInCondition(column string, values []string) (string, []any) {
+	placeholders := make([]string, 0, len(values))
 	args := make([]any, 0, len(values))
+	for _, value := range values {
+		placeholders = append(placeholders, "?::uuid")
+		args = append(args, value)
+	}
+	return fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ", ")), args
+}
+
+func uniquePositiveInt64s(values []int64) []int64 {
+	result := make([]int64, 0, len(values))
 	seen := make(map[int64]struct{}, len(values))
 	for _, value := range values {
 		if value <= 0 {
@@ -602,15 +556,7 @@ func int64Placeholders(values []int64) (string, []any) {
 			continue
 		}
 		seen[value] = struct{}{}
-		args = append(args, value)
+		result = append(result, value)
 	}
-	return placeholders(len(args), "::bigint"), args
-}
-
-func placeholders(count int, cast string) string {
-	parts := make([]string, 0, count)
-	for idx := 1; idx <= count; idx++ {
-		parts = append(parts, fmt.Sprintf("$%d%s", idx, cast))
-	}
-	return strings.Join(parts, ", ")
+	return result
 }

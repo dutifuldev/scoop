@@ -57,10 +57,6 @@ interface MemberURLGroup {
 }
 
 function memberGroupKey(member: StoryArticle): string {
-  const canonicalURL = member.canonical_url?.trim().toLowerCase() ?? "";
-  if (canonicalURL) {
-    return `url:${canonicalURL}`;
-  }
   return `member:${member.story_article_uuid}`;
 }
 
@@ -330,27 +326,13 @@ export function StoryDetailPanel({
       return [];
     }
 
-    const grouped = new Map<string, StoryArticle[]>();
-    for (const member of detail.members) {
-      const key = memberGroupKey(member);
-      const members = grouped.get(key);
-      if (members) {
-        members.push(member);
-        continue;
-      }
-      grouped.set(key, [member]);
-    }
-
-    return Array.from(grouped.entries()).map(([key, members]) => {
-      const sourceCount = new Set(members.map((member) => member.source)).size;
-      const representative = members[0];
-
+    return detail.members.map((member) => {
       return {
-        key,
-        canonicalURL: representative.canonical_url?.trim() ?? "",
-        members,
-        representative,
-        sourceCount,
+        key: memberGroupKey(member),
+        canonicalURL: member.canonical_url?.trim() ?? "",
+        members: [member],
+        representative: member,
+        sourceCount: 1,
       };
     });
   }, [detail]);

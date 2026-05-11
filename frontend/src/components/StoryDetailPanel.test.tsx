@@ -189,7 +189,7 @@ describe("StoryDetailPanel", () => {
     });
   });
 
-  it("collapses same-url duplicates into one visible item while showing dedup provenance rows", async () => {
+  it("renders same-url members as separate visible items", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -214,16 +214,16 @@ describe("StoryDetailPanel", () => {
 
     await waitFor(() => {
       const toggles = screen.getAllByRole("button", { name: /Collapse item/i });
-      expect(toggles).toHaveLength(1);
-      expect(screen.getByText("Deduped items")).toBeInTheDocument();
+      expect(toggles).toHaveLength(2);
+      expect(screen.queryByText("Deduped items")).not.toBeInTheDocument();
       expect(
-        screen.getByText("dedup_ai-news:simonwillison.net_2026_Feb_11_glm-5 • seed • score 1.000"),
+        screen.getByText("glm-5: from vibe coding to agentic engineering"),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(
-          "simon_willison:simonwillison.net_2026_Feb_11_glm-5 • exact_url • score 1.000",
-        ),
+        screen.getByText("glm-5: 754b parameter mit-licensed model released"),
       ).toBeInTheDocument();
+      expect(screen.getByText("Fetched preview for shared-member-1.")).toBeInTheDocument();
+      expect(screen.getByText("Fetched preview for shared-member-2.")).toBeInTheDocument();
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 4000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 4000);
     });

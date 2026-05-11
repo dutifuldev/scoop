@@ -3,6 +3,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { getStoryArticlePreview, requestTranslation } from "../api";
+import {
+  defaultCollectionTranslationMode,
+  isCollectionTranslationEnabled,
+} from "../lib/collectionTranslation";
 import { buildMemberSubtitle, formatDateTime } from "../lib/viewerFormat";
 import type { StoryDetailResponse, StoryArticlePreview, StoryArticle } from "../types";
 
@@ -67,9 +71,15 @@ export function StoryDetailPanel({
   onTranslationStateChange,
 }: StoryDetailPanelProps): JSX.Element {
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
-  const [itemPreviewByUUID, setItemPreviewByUUID] = useState<Record<string, StoryArticlePreview>>({});
-  const [itemPreviewLoadingByUUID, setItemPreviewLoadingByUUID] = useState<Record<string, boolean>>({});
-  const [itemPreviewRequestedByUUID, setItemPreviewRequestedByUUID] = useState<Record<string, boolean>>({});
+  const [itemPreviewByUUID, setItemPreviewByUUID] = useState<Record<string, StoryArticlePreview>>(
+    {},
+  );
+  const [itemPreviewLoadingByUUID, setItemPreviewLoadingByUUID] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [itemPreviewRequestedByUUID, setItemPreviewRequestedByUUID] = useState<
+    Record<string, boolean>
+  >({});
   const [itemPreviewErrorByUUID, setItemPreviewErrorByUUID] = useState<Record<string, string>>({});
   const [detailTextMode, setDetailTextMode] = useState<"translated" | "original">(
     activeLang ? "translated" : "original",
@@ -86,7 +96,10 @@ export function StoryDetailPanel({
     }
 
     const translatedTitle = (detail.story.translated_title || "").trim();
-    const hasUntranslatedBody = detail.members.some((member) => !(member.translated_text || "").trim());
+    const hasUntranslatedBody = detail.members.some((member) => {
+      const mode = member.translation_mode ?? defaultCollectionTranslationMode(member.collection);
+      return isCollectionTranslationEnabled(mode) && !(member.translated_text || "").trim();
+    });
     return translatedTitle === "" || hasUntranslatedBody;
   }, [activeLang, detail]);
 
@@ -109,7 +122,10 @@ export function StoryDetailPanel({
       .then(() => {
         // Keep the in-flight indicator visible until fresh translated content is loaded.
         return Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["story-detail", targetStoryUUID, targetLang], exact: true }),
+          queryClient.invalidateQueries({
+            queryKey: ["story-detail", targetStoryUUID, targetLang],
+            exact: true,
+          }),
           queryClient.invalidateQueries({ queryKey: ["stories"] }),
         ]).then(() =>
           Promise.all([
@@ -134,7 +150,14 @@ export function StoryDetailPanel({
         }
         onTranslationStateChange?.(targetStoryUUID, false);
       });
-  }, [activeLang, detail, hasPendingTranslations, onTranslationStateChange, queryClient, selectedStoryUUID]);
+  }, [
+    activeLang,
+    detail,
+    hasPendingTranslations,
+    onTranslationStateChange,
+    queryClient,
+    selectedStoryUUID,
+  ]);
 
   useEffect(() => {
     setTranslationError("");
@@ -206,7 +229,11 @@ export function StoryDetailPanel({
       if (isNewStorySelection) {
         const next = memberGroups.map((group) => group.key);
 
-        if (selectedGroupKey && validGroupKeys.has(selectedGroupKey) && !next.includes(selectedGroupKey)) {
+        if (
+          selectedGroupKey &&
+          validGroupKeys.has(selectedGroupKey) &&
+          !next.includes(selectedGroupKey)
+        ) {
           next.push(selectedGroupKey);
         }
 
@@ -215,7 +242,11 @@ export function StoryDetailPanel({
 
       const next = previous.filter((groupKey) => validGroupKeys.has(groupKey));
 
-      if (selectedGroupKey && validGroupKeys.has(selectedGroupKey) && !next.includes(selectedGroupKey)) {
+      if (
+        selectedGroupKey &&
+        validGroupKeys.has(selectedGroupKey) &&
+        !next.includes(selectedGroupKey)
+      ) {
         next.push(selectedGroupKey);
       }
 
@@ -292,7 +323,8 @@ export function StoryDetailPanel({
             }));
           })
           .catch((fetchErr) => {
-            const message = fetchErr instanceof Error ? fetchErr.message : "Failed to fetch reader preview.";
+            const message =
+              fetchErr instanceof Error ? fetchErr.message : "Failed to fetch reader preview.";
             setItemPreviewErrorByUUID((previous) => ({
               ...previous,
               [itemUUID]: message,
@@ -352,15 +384,16 @@ export function StoryDetailPanel({
       <>
         <div className="detail-title-row">
           <h2 className="detail-title">{displayTitle || "(untitled)"}</h2>
-          {showDetectedLanguage ? <span className="detail-language-badge">{detectedLanguage.toUpperCase()}</span> : null}
+          {showDetectedLanguage ? (
+            <span className="detail-language-badge">{detectedLanguage.toUpperCase()}</span>
+          ) : null}
         </div>
         {showTranslatedTitle ? (
-          <p className="detail-title-original">
-            Original: {originalTitle || "(untitled)"}
-          </p>
+          <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>
         ) : null}
         <p className="detail-meta">
-          Collection: {detail.story.collection} • {detail.story.article_count} items • {detail.story.source_count} sources
+          Collection: {detail.story.collection} • {detail.story.article_count} items •{" "}
+          {detail.story.source_count} sources
         </p>
       </>
     );
@@ -393,7 +426,12 @@ export function StoryDetailPanel({
           </div>
         ) : null}
         {showTranslationProgress ? (
-          <section className="translation-progress" role="status" aria-live="polite" aria-label="Translation in progress">
+          <section
+            className="translation-progress"
+            role="status"
+            aria-live="polite"
+            aria-label="Translation in progress"
+          >
             <div className="translation-progress-track" aria-hidden="true">
               <span className="translation-progress-bar" />
             </div>
@@ -404,15 +442,22 @@ export function StoryDetailPanel({
         ) : null}
         {translationError ? <p className="banner-error">{translationError}</p> : null}
         <section className="member-grid">
-          {memberGroups.length === 0 ? <p className="muted">No items found for this story.</p> : null}
+          {memberGroups.length === 0 ? (
+            <p className="muted">No items found for this story.</p>
+          ) : null}
           {memberGroups.map((group) => {
             const representative = group.representative;
             const isExpanded = expandedGroupKeys.includes(group.key);
             const hasSelectedMember = selectedGroupKey === group.key;
-            const decisionText = representative.dedup_decision ? representative.dedup_decision.toLowerCase() : "";
+            const decisionText = representative.dedup_decision
+              ? representative.dedup_decision.toLowerCase()
+              : "";
 
             const previewTexts = group.members
-              .map((member) => itemPreviewByUUID[member.story_article_uuid]?.preview_text?.trim() ?? "")
+              .map(
+                (member) =>
+                  itemPreviewByUUID[member.story_article_uuid]?.preview_text?.trim() ?? "",
+              )
               .filter((text) => text.length > 0);
             const originalTexts = group.members
               .map((member) => member.original_text?.trim() || member.normalized_text?.trim() || "")
@@ -427,11 +472,11 @@ export function StoryDetailPanel({
             const translatedParagraphs = toParagraphs(resolvedTranslatedText);
             const hasOriginalContent = originalParagraphs.length > 0;
             const hasTranslatedContent = translatedParagraphs.length > 0;
-            const isPreviewLoading = group.members.some(
-              (member) => Boolean(itemPreviewLoadingByUUID[member.story_article_uuid]),
+            const isPreviewLoading = group.members.some((member) =>
+              Boolean(itemPreviewLoadingByUUID[member.story_article_uuid]),
             );
-            const previewError = group.members.some(
-              (member) => Boolean(itemPreviewErrorByUUID[member.story_article_uuid]),
+            const previewError = group.members.some((member) =>
+              Boolean(itemPreviewErrorByUUID[member.story_article_uuid]),
             );
             const showTextModeToggle = hasOriginalContent && hasTranslatedContent;
             const orderedBlocks =
@@ -450,14 +495,18 @@ export function StoryDetailPanel({
                 : resolvedOriginalText || resolvedTranslatedText;
 
             const representativeOriginalTitle = (
-              representative.original_title || representative.normalized_title || ""
+              representative.original_title ||
+              representative.normalized_title ||
+              ""
             ).trim();
             const representativeTranslatedTitle = (representative.translated_title || "").trim();
             const representativeDisplayTitle =
               activeLang !== "" && representativeTranslatedTitle !== ""
                 ? representativeTranslatedTitle
                 : representativeOriginalTitle;
-            const routeItemUUID = hasSelectedMember ? selectedItemUUID : representative.story_article_uuid;
+            const routeItemUUID = hasSelectedMember
+              ? selectedItemUUID
+              : representative.story_article_uuid;
 
             return (
               <article
@@ -497,7 +546,8 @@ export function StoryDetailPanel({
                   )}
                 </button>
                 <p className="member-sub">
-                  matched {formatDateTime(representative.matched_at)} • published {formatDateTime(representative.published_at)}
+                  matched {formatDateTime(representative.matched_at)} • published{" "}
+                  {formatDateTime(representative.published_at)}
                   {decisionText ? (
                     <>
                       {" "}
@@ -514,19 +564,27 @@ export function StoryDetailPanel({
                 {isExpanded ? (
                   <>
                     {group.canonicalURL ? (
-                      <a className="member-expanded-url" href={group.canonicalURL} target="_blank" rel="noreferrer">
+                      <a
+                        className="member-expanded-url"
+                        href={group.canonicalURL}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         {group.canonicalURL}
                       </a>
                     ) : null}
                     <article className="detail-item-content member-expanded-content">
-                      {isPreviewLoading && !hasOriginalContent ? <p className="muted">Fetching reader preview...</p> : null}
+                      {isPreviewLoading && !hasOriginalContent ? (
+                        <p className="muted">Fetching reader preview...</p>
+                      ) : null}
                       {!isPreviewLoading && !hasOriginalContent && !hasTranslatedContent ? (
                         <p className="muted">No content captured for this item.</p>
                       ) : null}
 
                       {showTextModeToggle ? (
                         <p className="detail-item-content-mode-hint">
-                          Showing {detailTextMode === "translated" ? "translated first" : "original first"}.
+                          Showing{" "}
+                          {detailTextMode === "translated" ? "translated first" : "original first"}.
                         </p>
                       ) : null}
 
@@ -551,8 +609,13 @@ export function StoryDetailPanel({
                         )}
                       </div>
 
-                      {!isPreviewLoading && previewError && previewTexts.length === 0 && hasOriginalContent ? (
-                        <p className="muted">Reader preview unavailable. Showing captured content when available.</p>
+                      {!isPreviewLoading &&
+                      previewError &&
+                      previewTexts.length === 0 &&
+                      hasOriginalContent ? (
+                        <p className="muted">
+                          Reader preview unavailable. Showing captured content when available.
+                        </p>
                       ) : null}
                     </article>
                     {group.members.length > 1 ? (
@@ -583,7 +646,10 @@ export function StoryDetailPanel({
                                   {memberDecision ? (
                                     <>
                                       {" "}
-                                      • <span className="member-decision-inline">{memberDecision}</span>
+                                      •{" "}
+                                      <span className="member-decision-inline">
+                                        {memberDecision}
+                                      </span>
                                     </>
                                   ) : null}
                                 </p>
@@ -596,7 +662,9 @@ export function StoryDetailPanel({
                   </>
                 ) : null}
                 {!isExpanded ? (
-                  <p className="member-preview member-preview-collapsed">{buildMemberPreview(collapsedPreviewText)}</p>
+                  <p className="member-preview member-preview-collapsed">
+                    {buildMemberPreview(collapsedPreviewText)}
+                  </p>
                 ) : null}
               </article>
             );
@@ -609,7 +677,9 @@ export function StoryDetailPanel({
   return (
     <aside className="panel card detail-panel">
       <div className="detail-content">
-        {!selectedStoryUUID ? <p className="muted">Pick a story to inspect merged articles.</p> : null}
+        {!selectedStoryUUID ? (
+          <p className="muted">Pick a story to inspect merged articles.</p>
+        ) : null}
         {selectedStoryUUID && isLoading ? <p className="muted">Fetching story detail...</p> : null}
         {selectedStoryUUID && !isLoading && error ? <p className="muted">{error}</p> : null}
         {selectedStoryUUID && !isLoading && !error && detail ? renderStoryView() : null}

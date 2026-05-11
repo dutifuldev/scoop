@@ -29,18 +29,19 @@ type TranslationArticleTarget struct {
 
 // StoryTranslationRow is one cached translation row for story translation listings.
 type StoryTranslationRow struct {
-	TranslationUUID string
-	SourceType      string
-	SourceID        int64
-	SourceUUID      *string
-	SourceLang      string
-	TargetLang      string
-	OriginalText    string
-	TranslatedText  string
-	ProviderName    string
-	ModelName       *string
-	LatencyMS       *int
-	CreatedAt       time.Time
+	TranslationUUID  string
+	SourceType       string
+	SourceID         int64
+	SourceUUID       *string
+	SourceCollection string
+	SourceLang       string
+	TargetLang       string
+	OriginalText     string
+	TranslatedText   string
+	ProviderName     string
+	ModelName        *string
+	LatencyMS        *int
+	CreatedAt        time.Time
 }
 
 // CachedTranslationRow is one cached translation row for a source+target pair.
@@ -243,6 +244,11 @@ SELECT
 		WHEN ts.source_type IN ('article_title', 'article_text') THEN a.article_uuid::text
 		ELSE NULL
 	END AS source_uuid,
+	CASE
+		WHEN ts.source_type = 'story_title' THEN s.collection
+		WHEN ts.source_type IN ('article_title', 'article_text') THEN a.collection
+		ELSE ''
+	END AS source_collection,
 	ts.source_lang,
 	r.target_lang,
 	ts.original_text,
@@ -286,6 +292,7 @@ ORDER BY r.target_lang, ts.source_type, ts.source_id, ts.captured_at DESC, r.cre
 			&row.SourceType,
 			&row.SourceID,
 			&row.SourceUUID,
+			&row.SourceCollection,
 			&row.SourceLang,
 			&row.TargetLang,
 			&row.OriginalText,

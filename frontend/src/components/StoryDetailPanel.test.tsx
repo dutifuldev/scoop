@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getStoryArticlePreview } from "../api";
+import { getStoryArticlePreview, requestTranslation } from "../api";
 import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { StoryDetailResponse } from "../types";
 
@@ -144,6 +144,10 @@ function makeDetailWithSharedURL(): StoryDetailResponse {
 }
 
 describe("StoryDetailPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("auto-expands all items when a story is opened", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -212,5 +216,43 @@ describe("StoryDetailPanel", () => {
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 1000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 1000);
     });
+  });
+
+  it("does not request translation for disabled member collections", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeDetail();
+    detail.story.collection = "china_news";
+    detail.story.translation_mode = "enabled";
+    detail.story.translated_title = "Translated story title";
+    detail.members[0].collection = "openclaw";
+    detail.members[0].translation_mode = "disabled";
+    detail.members[0].translated_text = null;
+    detail.members[1].collection = "metal_news";
+    detail.members[1].translation_mode = "enabled";
+    detail.members[1].translated_text = "Translated member body.";
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-1"
+          selectedItemUUID=""
+          detail={detail}
+          activeLang="en"
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 1000);
+    });
+    expect(vi.mocked(requestTranslation)).not.toHaveBeenCalled();
   });
 });

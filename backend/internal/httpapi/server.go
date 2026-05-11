@@ -91,6 +91,7 @@ type StoryArticle struct {
 	Source               string         `json:"source"`
 	SourceItemID         string         `json:"source_item_id"`
 	Collection           string         `json:"collection"`
+	TranslationMode      string         `json:"translation_mode"`
 	CanonicalURL         *string        `json:"canonical_url,omitempty"`
 	PublishedAt          *time.Time     `json:"published_at,omitempty"`
 	NormalizedTitle      string         `json:"normalized_title"`
@@ -1211,6 +1212,13 @@ SELECT
 	d.source,
 	d.source_item_id,
 	d.collection,
+	COALESCE(
+		dcs.translation_mode,
+		CASE
+			WHEN d.collection IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	d.canonical_url,
 	d.published_at,
 	d.normalized_title,
@@ -1295,6 +1303,7 @@ ORDER BY sm.matched_at DESC
 			&member.Source,
 			&member.SourceItemID,
 			&member.Collection,
+			&member.TranslationMode,
 			&member.CanonicalURL,
 			&member.PublishedAt,
 			&member.NormalizedTitle,
@@ -1316,6 +1325,7 @@ ORDER BY sm.matched_at DESC
 		); err != nil {
 			return nil, fmt.Errorf("scan story article: %w", err)
 		}
+		member.TranslationMode = db.NormalizeCollectionTranslationMode(member.TranslationMode)
 		member.OriginalTitle = member.NormalizedTitle
 		member.OriginalText = member.NormalizedText
 		if lang != "" {

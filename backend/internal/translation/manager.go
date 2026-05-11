@@ -222,7 +222,15 @@ func (m *Manager) ListStoryTranslationsByUUID(ctx context.Context, storyUUID str
 	}
 
 	items := make([]CachedTranslation, 0, len(rows))
+	collectionEnabled := map[string]bool{}
 	for _, row := range rows {
+		enabled, err := m.collectionTranslationEnabled(ctx, row.SourceCollection, collectionEnabled)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			continue
+		}
 		items = append(items, CachedTranslation{
 			TranslationUUID: row.TranslationUUID,
 			SourceType:      row.SourceType,
@@ -254,21 +262,6 @@ func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarg
 		return RunStats{}, err
 	}
 
-	collectionEnabled := map[string]bool{}
-	isArticleCollectionEnabled := func(collection string) (bool, error) {
-		key := strings.ToLower(strings.TrimSpace(collection))
-		if enabled, ok := collectionEnabled[key]; ok {
-			return enabled, nil
-		}
-		mode, err := m.store.GetCollectionTranslationMode(ctx, collection)
-		if err != nil {
-			return false, err
-		}
-		enabled := db.IsCollectionTranslationEnabled(mode)
-		collectionEnabled[key] = enabled
-		return enabled, nil
-	}
-
 	tasks := make([]translationTask, 0, 1+(2*len(articles)))
 	if strings.TrimSpace(story.Title) != "" {
 		tasks = append(tasks, translationTask{
@@ -281,14 +274,6 @@ func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarg
 	}
 
 	for _, article := range articles {
-		enabled, err := isArticleCollectionEnabled(article.Collection)
-		if err != nil {
-			return RunStats{}, err
-		}
-		if !enabled {
-			continue
-		}
-
 		if strings.TrimSpace(article.Title) != "" {
 			tasks = append(tasks, translationTask{
 				SourceType:    SourceTypeArticleTitle,
@@ -440,14 +425,37 @@ func (m *Manager) runTasks(ctx context.Context, tasks []translationTask, opts Ru
 }
 
 func (m *Manager) requireCollectionTranslationEnabled(ctx context.Context, collection string) error {
-	mode, err := m.store.GetCollectionTranslationMode(ctx, collection)
+	enabled, err := m.collectionTranslationEnabled(ctx, collection, nil)
 	if err != nil {
 		return err
 	}
-	if !db.IsCollectionTranslationEnabled(mode) {
+	if !enabled {
 		return fmt.Errorf("%w for collection %q", ErrTranslationDisabled, strings.TrimSpace(collection))
 	}
 	return nil
+}
+
+func (m *Manager) collectionTranslationEnabled(
+	ctx context.Context,
+	collection string,
+	cache map[string]bool,
+) (bool, error) {
+	key := strings.ToLower(strings.TrimSpace(collection))
+	if cache != nil {
+		if enabled, ok := cache[key]; ok {
+			return enabled, nil
+		}
+	}
+
+	mode, err := m.store.GetCollectionTranslationMode(ctx, collection)
+	if err != nil {
+		return false, err
+	}
+	enabled := db.IsCollectionTranslationEnabled(mode)
+	if cache != nil {
+		cache[key] = enabled
+	}
+	return enabled, nil
 }
 
 func (m *Manager) resolveProvider(requested string) (Provider, error) {
@@ -501,7 +509,15 @@ func (m *Manager) fetchStoryArticles(ctx context.Context, storyID int64) ([]arti
 	}
 
 	items := make([]articleTranslationTarget, 0, len(rows))
+	collectionEnabled := map[string]bool{}
 	for _, row := range rows {
+		enabled, err := m.collectionTranslationEnabled(ctx, row.Collection, collectionEnabled)
+		if err != nil {
+			return nil, err
+		}
+		if !enabled {
+			continue
+		}
 		items = append(items, articleTranslationTarget{
 			ArticleID:    row.ArticleID,
 			ArticleUUID:  row.ArticleUUID,

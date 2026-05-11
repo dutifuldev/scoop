@@ -45,6 +45,7 @@ export interface StoryArticle {
   source: string;
   source_item_id: string;
   collection: string;
+  translation_mode?: "enabled" | "disabled";
   canonical_url?: string;
   published_at?: string;
   normalized_title: string;

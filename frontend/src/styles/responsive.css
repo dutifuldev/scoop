@@ -11,6 +11,14 @@
     @apply flex-wrap gap-2;
   }
 
+  .app-root-viewer .topbar {
+    @apply flex-wrap items-start gap-2;
+  }
+
+  .app-root-viewer .topbar-left {
+    @apply flex-none basis-full;
+  }
+
   .topbar-title {
     font-size: 1.08rem;
   }

@@ -537,7 +537,7 @@
   }
 
   .detail-text-block {
-    @apply grid gap-3 rounded-[8px] border border-panel-500/60 px-4 py-4;
+    @apply grid gap-3 rounded-[8px] border border-panel-500/60 px-5 py-4;
   }
 
   .detail-text-block-original {
@@ -823,7 +823,7 @@
   }
 
   .app-root-viewer .member-expanded-url {
-    @apply px-0 py-1;
+    @apply px-2.5 py-1.5;
   }
 
   .app-root-viewer .member-expanded-content {
@@ -851,7 +851,7 @@
   }
 
   .app-root-viewer .detail-title {
-    @apply p-4;
+    @apply p-0;
   }
 
   .app-root-viewer .detail-meta,

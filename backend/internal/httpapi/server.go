@@ -667,6 +667,9 @@ func (s *Server) handleStoryTranslations(c echo.Context) error {
 		if errors.Is(err, translation.ErrStoryNotFound) {
 			return failNotFound(c, "Story not found")
 		}
+		if errors.Is(err, translation.ErrTranslationDisabled) {
+			return failValidation(c, map[string]string{"collection": "translation is disabled for this collection"})
+		}
 		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("query story translations failed")
 		return internalError(c, "Failed to load story translations")
 	}

@@ -212,6 +212,9 @@ func (m *Manager) ListStoryTranslationsByUUID(ctx context.Context, storyUUID str
 	if err != nil {
 		return nil, err
 	}
+	if err := m.requireCollectionTranslationEnabled(ctx, story.Collection); err != nil {
+		return nil, err
+	}
 
 	rows, err := m.store.ListStoryTranslationRows(ctx, story.StoryID)
 	if err != nil {

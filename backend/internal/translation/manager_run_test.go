@@ -238,3 +238,24 @@ func TestTranslateStoryByUUID_RejectsDisabledCollection(t *testing.T) {
 		t.Fatalf("did not expect upsert source calls, got %d", len(store.upsertSourceCalls))
 	}
 }
+
+func TestListStoryTranslationsByUUID_RejectsDisabledCollection(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "openclaw",
+			Title:      "OpenClaw story",
+			SourceLang: "en",
+		},
+		collectionMode: db.TranslationModeDisabled,
+	}
+	manager := NewManagerWithStore(store, NewRegistry("stub"))
+
+	_, err := manager.ListStoryTranslationsByUUID(context.Background(), "story-uuid")
+	if !errors.Is(err, ErrTranslationDisabled) {
+		t.Fatalf("expected ErrTranslationDisabled, got %v", err)
+	}
+}

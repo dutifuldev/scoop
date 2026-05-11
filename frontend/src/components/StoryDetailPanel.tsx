@@ -1,22 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
-import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import discordLogoURL from "../assets/discord.svg";
-import {
-  addArticleTag,
-  getStoryArticlePreview,
-  removeArticleTag,
-  requestTranslation,
-} from "../api";
+import { addArticleTag, removeArticleTag, requestTranslation } from "../api";
+import { useStoryArticlePreviews } from "../hooks/useStoryArticlePreviews";
 import {
   defaultCollectionTranslationMode,
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import { buildMemberSubtitle, formatDateTime } from "../lib/viewerFormat";
-import type { StoryDetailResponse, StoryArticlePreview, StoryArticle, Tag } from "../types";
-import { Input } from "./ui/input";
+import type { StoryDetailResponse, StoryArticle, Tag } from "../types";
+import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
+import {
+  buildMemberPreview,
+  DiscordLinkIcon,
+  discordMessagePattern,
+  labelForURL,
+  renderTextBlock,
+  toParagraphs,
+} from "./story-detail/storyTextRendering";
 
 interface StoryDetailPanelProps {
   selectedStoryUUID: string;
@@ -31,24 +33,6 @@ interface StoryDetailPanelProps {
   onTranslationStateChange?: (storyUUID: string, isTranslating: boolean) => void;
 }
 
-function pruneRecord<T>(record: Record<string, T>, validIDs: Set<string>): Record<string, T> {
-  const next: Record<string, T> = {};
-  let changed = false;
-
-  for (const [key, value] of Object.entries(record)) {
-    if (validIDs.has(key)) {
-      next[key] = value;
-      continue;
-    }
-    changed = true;
-  }
-
-  if (!changed && Object.keys(next).length === Object.keys(record).length) {
-    return record;
-  }
-  return next;
-}
-
 interface MemberURLGroup {
   key: string;
   canonicalURL: string;
@@ -59,147 +43,6 @@ interface MemberURLGroup {
 
 function memberGroupKey(member: StoryArticle): string {
   return `member:${member.story_article_uuid}`;
-}
-
-const previewRequestBatchSize = 4;
-const previewRequestDebounceMs = 120;
-const expandedArticlePreviewMaxChars = 4000;
-const inlineLinkPattern =
-  /\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]}>,]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)\]}>,]*)?)/gi;
-const discordMessagePattern = /^https?:\/\/discord\.com\/channels\/([^/]+)\/([^/]+)\/([^/?#]+)/i;
-
-function trimTrailingURLPunctuation(rawURL: string): { url: string; trailing: string } {
-  const match = rawURL.match(/[.,;:!?]+$/);
-  if (!match) {
-    return { url: rawURL, trailing: "" };
-  }
-  return { url: rawURL.slice(0, -match[0].length), trailing: match[0] };
-}
-
-function normalizeURLTarget(rawURL: string): { url: string; trailing: string } | null {
-  const { url, trailing } = trimTrailingURLPunctuation(rawURL);
-
-  if (/^https?:\/\//i.test(url)) {
-    return { url, trailing };
-  }
-
-  if (/^(?:www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/:?#]|$))/i.test(url)) {
-    return { url: `https://${url}`, trailing };
-  }
-
-  return null;
-}
-
-function labelForURL(url: string): string {
-  const discordMatch = url.match(discordMessagePattern);
-  if (discordMatch) {
-    return "Discord message";
-  }
-
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
-function renderInlineLinks(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let lastIndex = 0;
-
-  for (const match of text.matchAll(inlineLinkPattern)) {
-    const start = match.index ?? 0;
-    const markdownLabel = match[1];
-    const markdownURL = match[2];
-    const rawURL = match[3];
-    const rawMatch = match[0];
-    const normalizedURL = normalizeURLTarget(markdownURL || rawURL || "");
-
-    if (!normalizedURL) {
-      continue;
-    }
-    const { url, trailing } = normalizedURL;
-
-    if (start > lastIndex) {
-      nodes.push(text.slice(lastIndex, start));
-    }
-
-    const isDiscordMessage = discordMessagePattern.test(url);
-    nodes.push(
-      <a
-        key={`${url}-${start}`}
-        className={isDiscordMessage ? "inline-discord-link" : "inline-rich-link"}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        title={url}
-      >
-        {isDiscordMessage ? (
-          <img className="discord-link-icon" src={discordLogoURL} alt="" aria-hidden="true" />
-        ) : null}
-        {markdownLabel || labelForURL(url)}
-      </a>,
-    );
-    if (!markdownURL && trailing) {
-      nodes.push(trailing);
-    }
-    lastIndex = start + rawMatch.length;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes;
-}
-
-function renderTextBlock(paragraph: string, key: string): JSX.Element {
-  const heading = paragraph.match(/^(#{1,3})\s+(.+)$/);
-  if (heading) {
-    const levelClass = `detail-markdown-heading detail-markdown-heading-${heading[1].length}`;
-    return (
-      <p key={key} className={levelClass}>
-        {renderInlineLinks(heading[2])}
-      </p>
-    );
-  }
-
-  const lines = paragraph
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const bulletLines = lines
-    .map((line) => line.match(/^[-*]\s+(.+)$/)?.[1])
-    .filter((line): line is string => Boolean(line));
-
-  if (bulletLines.length === lines.length) {
-    return (
-      <ul key={key} className="detail-markdown-list">
-        {bulletLines.map((line, index) => (
-          <li key={`${key}-bullet-${index}`}>{renderInlineLinks(line)}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  return (
-    <p key={key} className="detail-item-content-text">
-      {renderInlineLinks(paragraph)}
-    </p>
-  );
-}
-
-function tagChipStyle(tag: Tag): CSSProperties | undefined {
-  return tag.color ? ({ "--tag-color": tag.color } as CSSProperties) : undefined;
-}
-
-function normalizeTagInput(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "")
-    .replace(/-{2,}/g, "-")
-    .slice(0, 64);
 }
 
 export function StoryDetailPanel({
@@ -215,16 +58,6 @@ export function StoryDetailPanel({
   onTranslationStateChange,
 }: StoryDetailPanelProps): JSX.Element {
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
-  const [itemPreviewByUUID, setItemPreviewByUUID] = useState<Record<string, StoryArticlePreview>>(
-    {},
-  );
-  const [itemPreviewLoadingByUUID, setItemPreviewLoadingByUUID] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [itemPreviewRequestedByUUID, setItemPreviewRequestedByUUID] = useState<
-    Record<string, boolean>
-  >({});
-  const [itemPreviewErrorByUUID, setItemPreviewErrorByUUID] = useState<Record<string, string>>({});
   const [detailTextMode, setDetailTextMode] = useState<"translated" | "original">(
     activeLang ? "translated" : "original",
   );
@@ -232,13 +65,12 @@ export function StoryDetailPanel({
   const [translationError, setTranslationError] = useState("");
   const [tagMutationKey, setTagMutationKey] = useState("");
   const [tagMutationError, setTagMutationError] = useState("");
-  const [activeTagArticleUUID, setActiveTagArticleUUID] = useState("");
-  const [tagInputValue, setTagInputValue] = useState("");
   const translationRequestedRef = useRef<string>("");
   const activeTranslationKeyRef = useRef<string>("");
   const previousStoryUUIDRef = useRef<string>("");
-  const tagInputBlurTimerRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
+  const { itemPreviewByUUID, itemPreviewLoadingByUUID, itemPreviewErrorByUUID } =
+    useStoryArticlePreviews(detail);
   const hasPendingTranslations = useMemo(() => {
     if (!activeLang || !detail) {
       return false;
@@ -312,19 +144,6 @@ export function StoryDetailPanel({
     setTranslationError("");
   }, [selectedStoryUUID, activeLang]);
 
-  useEffect(() => {
-    setActiveTagArticleUUID("");
-    setTagInputValue("");
-  }, [selectedStoryUUID]);
-
-  useEffect(() => {
-    return () => {
-      if (tagInputBlurTimerRef.current !== null) {
-        window.clearTimeout(tagInputBlurTimerRef.current);
-      }
-    };
-  }, []);
-
   const memberGroups = useMemo<MemberURLGroup[]>(() => {
     if (!detail) {
       return [];
@@ -360,15 +179,10 @@ export function StoryDetailPanel({
   useEffect(() => {
     if (!detail) {
       setExpandedGroupKeys([]);
-      setItemPreviewByUUID({});
-      setItemPreviewLoadingByUUID({});
-      setItemPreviewRequestedByUUID({});
-      setItemPreviewErrorByUUID({});
       previousStoryUUIDRef.current = "";
       return;
     }
 
-    const validItemIDs = new Set(detail.members.map((member) => member.story_article_uuid));
     const validGroupKeys = new Set(memberGroups.map((group) => group.key));
     const isNewStorySelection = previousStoryUUIDRef.current !== detail.story.story_uuid;
     previousStoryUUIDRef.current = detail.story.story_uuid;
@@ -407,114 +221,11 @@ export function StoryDetailPanel({
 
       return next;
     });
-
-    setItemPreviewByUUID((previous) => pruneRecord(previous, validItemIDs));
-    setItemPreviewLoadingByUUID((previous) => pruneRecord(previous, validItemIDs));
-    setItemPreviewRequestedByUUID((previous) => pruneRecord(previous, validItemIDs));
-    setItemPreviewErrorByUUID((previous) => pruneRecord(previous, validItemIDs));
   }, [detail, memberGroups, selectedGroupKey]);
 
   useEffect(() => {
     setDetailTextMode(activeLang ? "translated" : "original");
   }, [activeLang]);
-
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    const pendingUUIDs = detail.members
-      .map((member) => member.story_article_uuid)
-      .filter((itemUUID) => !itemPreviewRequestedByUUID[itemUUID]);
-    if (pendingUUIDs.length === 0) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      const batch = pendingUUIDs.slice(0, previewRequestBatchSize);
-      if (batch.length === 0) {
-        return;
-      }
-
-      setItemPreviewRequestedByUUID((previous) => {
-        const next = { ...previous };
-        for (const itemUUID of batch) {
-          next[itemUUID] = true;
-        }
-        return next;
-      });
-      setItemPreviewLoadingByUUID((previous) => {
-        const next = { ...previous };
-        for (const itemUUID of batch) {
-          next[itemUUID] = true;
-        }
-        return next;
-      });
-      setItemPreviewErrorByUUID((previous) => {
-        let changed = false;
-        const next = { ...previous };
-        for (const itemUUID of batch) {
-          if (next[itemUUID]) {
-            delete next[itemUUID];
-            changed = true;
-          }
-        }
-        return changed ? next : previous;
-      });
-
-      for (const itemUUID of batch) {
-        void getStoryArticlePreview(itemUUID, expandedArticlePreviewMaxChars)
-          .then((preview) => {
-            setItemPreviewByUUID((previous) => ({
-              ...previous,
-              [itemUUID]: preview,
-            }));
-          })
-          .catch((fetchErr) => {
-            const message =
-              fetchErr instanceof Error ? fetchErr.message : "Failed to fetch reader preview.";
-            setItemPreviewErrorByUUID((previous) => ({
-              ...previous,
-              [itemUUID]: message,
-            }));
-          })
-          .finally(() => {
-            setItemPreviewLoadingByUUID((previous) => {
-              if (!previous[itemUUID]) {
-                return previous;
-              }
-              const next = { ...previous };
-              delete next[itemUUID];
-              return next;
-            });
-          });
-      }
-    }, previewRequestDebounceMs);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [detail, itemPreviewRequestedByUUID]);
-
-  function buildMemberPreview(text?: string): string {
-    const collapsed = (text ?? "").replace(/\s+/g, " ").trim();
-    if (!collapsed) {
-      return "No content captured for this item.";
-    }
-
-    const maxChars = 260;
-    if (collapsed.length <= maxChars) {
-      return collapsed;
-    }
-    return `${collapsed.slice(0, maxChars).trimEnd()}...`;
-  }
-
-  function toParagraphs(text: string): string[] {
-    return text
-      .split(/\n+/)
-      .map((paragraph) => paragraph.trim())
-      .filter((paragraph) => paragraph.length > 0);
-  }
 
   async function refreshTagsAfterMutation(): Promise<void> {
     await Promise.all([
@@ -533,11 +244,10 @@ export function StoryDetailPanel({
     setTagMutationError("");
     try {
       await addArticleTag(articleUUID, tagSlug);
-      setTagInputValue("");
-      setActiveTagArticleUUID("");
       await refreshTagsAfterMutation();
     } catch (err) {
       setTagMutationError(err instanceof Error ? err.message : "Failed to add tag.");
+      throw err;
     } finally {
       setTagMutationKey("");
     }
@@ -559,148 +269,6 @@ export function StoryDetailPanel({
     } finally {
       setTagMutationKey("");
     }
-  }
-
-  function renderArticleTags(member: StoryArticle): JSX.Element {
-    const currentTags = member.tags ?? [];
-    const currentTagsSet = new Set(currentTags.map((tag) => tag.tag));
-    const addableTags = availableTags.filter((tag) => !currentTagsSet.has(tag.tag));
-    const isInputActive = activeTagArticleUUID === member.article_uuid;
-    const normalizedInputValue = isInputActive ? tagInputValue : "";
-    const visibleSuggestions = addableTags
-      .filter((tag) => !normalizedInputValue || tag.tag.includes(normalizedInputValue))
-      .slice(0, 8);
-    const exactTag = addableTags.find((tag) => tag.tag === normalizedInputValue);
-    const hasSuggestions = isInputActive && visibleSuggestions.length > 0;
-
-    if (!isInputActive && currentTags.length === 0 && addableTags.length === 0) {
-      return <></>;
-    }
-
-    const renderedCurrentTags = currentTags.map((tag) => {
-      const mutationKey = `${member.article_uuid}:${tag.tag}:remove`;
-      return (
-        <span key={tag.tag} className="tag-chip" style={tagChipStyle(tag)}>
-          {tag.tag}
-          <button
-            type="button"
-            className="tag-chip-remove"
-            onClick={() => {
-              void onRemoveArticleTag(member.article_uuid, tag.tag);
-            }}
-            disabled={tagMutationKey === mutationKey}
-            aria-label={`Remove ${tag.tag} tag`}
-          >
-            <X className="h-3 w-3" aria-hidden="true" />
-          </button>
-        </span>
-      );
-    });
-
-    return (
-      <div className="member-tag-tools">
-        {!isInputActive ? (
-          <div className="member-tag-row" aria-label="Article tags">
-            {renderedCurrentTags}
-            {addableTags.length > 0 ? (
-              <button
-                type="button"
-                className="member-tag-add-button"
-                aria-label="Add article tag"
-                title="Add tag"
-                onClick={() => {
-                  if (tagInputBlurTimerRef.current !== null) {
-                    window.clearTimeout(tagInputBlurTimerRef.current);
-                    tagInputBlurTimerRef.current = null;
-                  }
-                  setActiveTagArticleUUID(member.article_uuid);
-                  setTagInputValue("");
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <div
-            className="member-tag-input-shell is-active"
-            aria-label="Article tags"
-            onMouseDown={() => {
-              if (tagInputBlurTimerRef.current !== null) {
-                window.clearTimeout(tagInputBlurTimerRef.current);
-                tagInputBlurTimerRef.current = null;
-              }
-            }}
-          >
-            {renderedCurrentTags}
-            <div className="member-tag-input-wrap">
-              <Input
-                value={normalizedInputValue}
-                onFocus={() => {
-                  if (tagInputBlurTimerRef.current !== null) {
-                    window.clearTimeout(tagInputBlurTimerRef.current);
-                    tagInputBlurTimerRef.current = null;
-                  }
-                  setActiveTagArticleUUID(member.article_uuid);
-                }}
-                onBlur={() => {
-                  tagInputBlurTimerRef.current = window.setTimeout(() => {
-                    setActiveTagArticleUUID("");
-                    setTagInputValue("");
-                  }, 120);
-                }}
-                onChange={(event) => {
-                  setActiveTagArticleUUID(member.article_uuid);
-                  setTagInputValue(normalizeTagInput(event.target.value));
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    if (exactTag) {
-                      void onAddArticleTag(member.article_uuid, exactTag.tag);
-                    }
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    setActiveTagArticleUUID("");
-                    setTagInputValue("");
-                  }
-                }}
-                className="member-tag-input"
-                placeholder="Add tag"
-                aria-label="Article tag search"
-                autoComplete="off"
-                autoFocus
-                spellCheck={false}
-              />
-              {hasSuggestions ? (
-                <div className="member-tag-suggestions" role="listbox" aria-label="Matching tags">
-                  {visibleSuggestions.map((tag) => {
-                    const mutationKey = `${member.article_uuid}:${tag.tag}:add`;
-                    return (
-                      <button
-                        key={tag.tag}
-                        type="button"
-                        className="member-tag-suggestion"
-                        style={tagChipStyle(tag)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          void onAddArticleTag(member.article_uuid, tag.tag);
-                        }}
-                        disabled={tagMutationKey === mutationKey}
-                        role="option"
-                      >
-                        {tag.tag}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        )}
-      </div>
-    );
   }
 
   function renderStoryHeader(): JSX.Element {
@@ -892,7 +460,14 @@ export function StoryDetailPanel({
                     </>
                   ) : null}
                 </p>
-                {renderArticleTags(representative)}
+                <ArticleTagEditor
+                  articleUUID={representative.article_uuid}
+                  currentTags={representative.tags ?? []}
+                  availableTags={availableTags}
+                  mutationKey={tagMutationKey}
+                  onAddTag={onAddArticleTag}
+                  onRemoveTag={onRemoveArticleTag}
+                />
                 {isExpanded ? (
                   <>
                     {group.canonicalURL ? (
@@ -904,12 +479,7 @@ export function StoryDetailPanel({
                         title={group.canonicalURL}
                       >
                         {discordMessagePattern.test(group.canonicalURL) ? (
-                          <img
-                            className="discord-link-icon"
-                            src={discordLogoURL}
-                            alt=""
-                            aria-hidden="true"
-                          />
+                          <DiscordLinkIcon />
                         ) : null}
                         {labelForURL(group.canonicalURL)}
                       </a>
@@ -994,7 +564,14 @@ export function StoryDetailPanel({
                                     </>
                                   ) : null}
                                 </p>
-                                {renderArticleTags(groupMember)}
+                                <ArticleTagEditor
+                                  articleUUID={groupMember.article_uuid}
+                                  currentTags={groupMember.tags ?? []}
+                                  availableTags={availableTags}
+                                  mutationKey={tagMutationKey}
+                                  onAddTag={onAddArticleTag}
+                                  onRemoveTag={onRemoveArticleTag}
+                                />
                               </li>
                             );
                           })}

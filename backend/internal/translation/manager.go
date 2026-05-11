@@ -24,8 +24,9 @@ const (
 )
 
 var (
-	ErrStoryNotFound   = errors.New("story not found")
-	ErrArticleNotFound = errors.New("article not found")
+	ErrStoryNotFound       = errors.New("story not found")
+	ErrArticleNotFound     = errors.New("article not found")
+	ErrTranslationDisabled = errors.New("translation disabled")
 )
 
 // RunOptions controls translation execution.
@@ -79,6 +80,7 @@ type translationStore interface {
 	ListTranslationStoriesByCollection(ctx context.Context, collection string) ([]db.TranslationStoryTarget, error)
 	ListTranslationStoryArticles(ctx context.Context, storyID int64) ([]db.TranslationArticleTarget, error)
 	GetTranslationArticleByUUID(ctx context.Context, articleUUID string) (db.TranslationArticleTarget, error)
+	GetCollectionTranslationMode(ctx context.Context, collection string) (string, error)
 	ListStoryTranslationRows(ctx context.Context, storyID int64) ([]db.StoryTranslationRow, error)
 	LookupCachedTranslationRow(ctx context.Context, translationSourceID int64, targetLang string) (*db.CachedTranslationRow, error)
 	UpsertTranslationSource(ctx context.Context, row db.UpsertTranslationSourceParams) (int64, error)
@@ -115,6 +117,9 @@ func (m *Manager) TranslateStoryByUUID(ctx context.Context, storyUUID string, op
 	if err != nil {
 		return RunStats{}, err
 	}
+	if err := m.requireCollectionTranslationEnabled(ctx, story.Collection); err != nil {
+		return RunStats{}, err
+	}
 	return m.translateStory(ctx, story, opts)
 }
 
@@ -131,6 +136,9 @@ func (m *Manager) TranslateArticleByUUID(ctx context.Context, articleUUID string
 
 	article, err := m.fetchArticleByUUID(ctx, articleUUID)
 	if err != nil {
+		return RunStats{}, err
+	}
+	if err := m.requireCollectionTranslationEnabled(ctx, article.Collection); err != nil {
 		return RunStats{}, err
 	}
 
@@ -160,6 +168,9 @@ func (m *Manager) TranslateArticleByUUID(ctx context.Context, articleUUID string
 func (m *Manager) TranslateCollection(ctx context.Context, collection string, opts CollectionRunOptions) (RunStats, error) {
 	if m == nil || m.store == nil {
 		return RunStats{}, fmt.Errorf("translation manager is not initialized")
+	}
+	if err := m.requireCollectionTranslationEnabled(ctx, collection); err != nil {
+		return RunStats{}, err
 	}
 
 	stories, err := m.listStoriesByCollection(ctx, collection)
@@ -402,6 +413,17 @@ func (m *Manager) runTasks(ctx context.Context, tasks []translationTask, opts Ru
 	return stats, nil
 }
 
+func (m *Manager) requireCollectionTranslationEnabled(ctx context.Context, collection string) error {
+	mode, err := m.store.GetCollectionTranslationMode(ctx, collection)
+	if err != nil {
+		return err
+	}
+	if !db.IsCollectionTranslationEnabled(mode) {
+		return fmt.Errorf("%w for collection %q", ErrTranslationDisabled, strings.TrimSpace(collection))
+	}
+	return nil
+}
+
 func (m *Manager) resolveProvider(requested string) (Provider, error) {
 	if m == nil || m.registry == nil {
 		return nil, fmt.Errorf("translation provider registry is not initialized")
@@ -420,6 +442,7 @@ func (m *Manager) fetchStoryByUUID(ctx context.Context, storyUUID string) (story
 	return storyTranslationTarget{
 		StoryID:    row.StoryID,
 		StoryUUID:  row.StoryUUID,
+		Collection: row.Collection,
 		Title:      row.Title,
 		SourceLang: row.SourceLang,
 	}, nil
@@ -436,6 +459,7 @@ func (m *Manager) listStoriesByCollection(ctx context.Context, collection string
 		items = append(items, storyTranslationTarget{
 			StoryID:    row.StoryID,
 			StoryUUID:  row.StoryUUID,
+			Collection: row.Collection,
 			Title:      row.Title,
 			SourceLang: row.SourceLang,
 		})
@@ -455,6 +479,7 @@ func (m *Manager) fetchStoryArticles(ctx context.Context, storyID int64) ([]arti
 		items = append(items, articleTranslationTarget{
 			ArticleID:    row.ArticleID,
 			ArticleUUID:  row.ArticleUUID,
+			Collection:   row.Collection,
 			Title:        row.Title,
 			Text:         row.Text,
 			SourceLang:   row.SourceLang,
@@ -483,6 +508,7 @@ func (m *Manager) fetchArticleByUUID(ctx context.Context, articleUUID string) (a
 	item := articleTranslationTarget{
 		ArticleID:    row.ArticleID,
 		ArticleUUID:  row.ArticleUUID,
+		Collection:   row.Collection,
 		Title:        row.Title,
 		Text:         row.Text,
 		SourceLang:   row.SourceLang,
@@ -615,6 +641,7 @@ type translationTask struct {
 type storyTranslationTarget struct {
 	StoryID    int64
 	StoryUUID  string
+	Collection string
 	Title      string
 	SourceLang string
 }
@@ -622,6 +649,7 @@ type storyTranslationTarget struct {
 type articleTranslationTarget struct {
 	ArticleID    int64
 	ArticleUUID  string
+	Collection   string
 	Title        string
 	Text         string
 	TextOrigin   string

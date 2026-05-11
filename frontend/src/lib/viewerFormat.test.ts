@@ -9,6 +9,7 @@ function makeStory(overrides: Partial<StoryListItem>): StoryListItem {
     story_id: 1,
     story_uuid: "00000000-0000-0000-0000-000000000001",
     collection: "test",
+    translation_mode: "disabled",
     title: "Test story",
     original_title: "Test story",
     translated_title: null,
@@ -91,7 +92,9 @@ describe("buildFeedMetaText", () => {
       source_count: 1,
     });
 
-    expect(buildFeedMetaText(story, true)).toMatch(/^Feb 14, \d{2}:\d{2} • news\.ycombinator\.com$/);
+    expect(buildFeedMetaText(story, true)).toMatch(
+      /^Feb 14, \d{2}:\d{2} • news\.ycombinator\.com$/,
+    );
   });
 });
 

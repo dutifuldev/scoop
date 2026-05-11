@@ -30,6 +30,7 @@ type ArticleListItem struct {
 // CollectionCount is used by the collections CLI command.
 type CollectionCount struct {
 	Collection        string     `json:"collection"`
+	TranslationMode   string     `json:"translation_mode"`
 	ArticleCount      int64      `json:"article_count"`
 	StoryCount        int64      `json:"story_count"`
 	EarliestArticleAt *time.Time `json:"earliest_article_at,omitempty"`
@@ -122,6 +123,13 @@ story_counts AS (
 )
 SELECT
 	COALESCE(a.collection, s.collection) AS collection,
+	COALESCE(
+		cs.translation_mode,
+		CASE
+			WHEN COALESCE(a.collection, s.collection) IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
 	COALESCE(a.article_count, 0) AS article_count,
 	COALESCE(s.story_count, 0) AS story_count,
 	a.earliest_article_at,
@@ -129,6 +137,8 @@ SELECT
 FROM article_stats a
 FULL OUTER JOIN story_counts s
 	ON s.collection = a.collection
+LEFT JOIN news.collection_settings cs
+	ON cs.collection = COALESCE(a.collection, s.collection)
 ORDER BY 1
 `
 
@@ -143,6 +153,7 @@ ORDER BY 1
 		var row CollectionCount
 		if err := rows.Scan(
 			&row.Collection,
+			&row.TranslationMode,
 			&row.ArticleCount,
 			&row.StoryCount,
 			&row.EarliestArticleAt,
@@ -150,6 +161,7 @@ ORDER BY 1
 		); err != nil {
 			return nil, fmt.Errorf("scan collection row: %w", err)
 		}
+		row.TranslationMode = NormalizeCollectionTranslationMode(row.TranslationMode)
 		items = append(items, row)
 	}
 	if err := rows.Err(); err != nil {

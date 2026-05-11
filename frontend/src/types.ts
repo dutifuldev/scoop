@@ -25,6 +25,7 @@ export interface StoryListItem {
   story_id: number;
   story_uuid: string;
   collection: string;
+  translation_mode: "enabled" | "disabled";
   title: string;
   original_title: string;
   translated_title?: string | null;
@@ -82,10 +83,18 @@ export interface StoryArticlePreview {
 
 export interface CollectionSummary {
   collection: string;
+  translation_mode: "enabled" | "disabled";
   articles: number;
   stories: number;
   story_items: number;
   last_story_seen_at?: string;
+}
+
+export interface CollectionSettings {
+  collection: string;
+  translation_mode: "enabled" | "disabled";
+  created_at: string;
+  updated_at: string;
 }
 
 export interface StoryDayBucket {

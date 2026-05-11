@@ -14,7 +14,9 @@ vi.mock("../api", () => ({
     char_count: 64,
     truncated: false,
   })),
-  requestTranslation: vi.fn(async () => ({ stats: { total: 1, translated: 1, cached: 0, skipped: 0 } })),
+  requestTranslation: vi.fn(async () => ({
+    stats: { total: 1, translated: 1, cached: 0, skipped: 0 },
+  })),
 }));
 
 function makeDetail(): StoryDetailResponse {
@@ -23,6 +25,7 @@ function makeDetail(): StoryDetailResponse {
       story_id: 1,
       story_uuid: "story-uuid-1",
       collection: "ai_news",
+      translation_mode: "disabled",
       title: "Story Title",
       original_title: "Story Title",
       translated_title: null,
@@ -83,6 +86,7 @@ function makeDetailWithSharedURL(): StoryDetailResponse {
       story_id: 2,
       story_uuid: "story-uuid-shared",
       collection: "ai_news",
+      translation_mode: "disabled",
       title: "Shared URL Story",
       original_title: "Shared URL Story",
       translated_title: null,
@@ -201,7 +205,9 @@ describe("StoryDetailPanel", () => {
         screen.getByText("dedup_ai-news:simonwillison.net_2026_Feb_11_glm-5 • seed • score 1.000"),
       ).toBeInTheDocument();
       expect(
-        screen.getByText("simon_willison:simonwillison.net_2026_Feb_11_glm-5 • exact_url • score 1.000"),
+        screen.getByText(
+          "simon_willison:simonwillison.net_2026_Feb_11_glm-5 • exact_url • score 1.000",
+        ),
       ).toBeInTheDocument();
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 1000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 1000);

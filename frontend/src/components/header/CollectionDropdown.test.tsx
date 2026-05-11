@@ -13,8 +13,20 @@ function renderCollectionDropdown(): void {
       allCollectionsLabel="All collections (3)"
       currentCollectionLabel="AI News"
       collections={[
-        { collection: "ai-news", articles: 10, stories: 2, story_items: 7 },
-        { collection: "world-news", articles: 20, stories: 1, story_items: 4 },
+        {
+          collection: "ai-news",
+          translation_mode: "disabled",
+          articles: 10,
+          stories: 2,
+          story_items: 7,
+        },
+        {
+          collection: "world-news",
+          translation_mode: "disabled",
+          articles: 20,
+          stories: 1,
+          story_items: 4,
+        },
       ]}
       onCollectionChange={vi.fn()}
     />,
@@ -29,14 +41,24 @@ describe("CollectionDropdown", () => {
         allCollectionsValue="__all__"
         allCollectionsLabel="All collections (3)"
         currentCollectionLabel="AI News"
-        collections={[{ collection: "ai-news", articles: 10, stories: 2, story_items: 7 }]}
+        collections={[
+          {
+            collection: "ai-news",
+            translation_mode: "disabled",
+            articles: 10,
+            stories: 2,
+            story_items: 7,
+          },
+        ]}
         onCollectionChange={vi.fn()}
       />,
     );
 
     expect(screen.getByText("SCOOP")).toHaveClass("brand-select-prefix");
     expect(screen.getByText("AI News")).toHaveClass("brand-select-current");
-    expect(container.querySelector("button.brand-select-trigger > div.brand-select-label")).toBeInTheDocument();
+    expect(
+      container.querySelector("button.brand-select-trigger > div.brand-select-label"),
+    ).toBeInTheDocument();
     expect(container.querySelector(".brand-select-separator-dot")).toBeInTheDocument();
     expect(shellStyles).toContain(".brand-select-label");
     expect(shellStyles).toContain("whitespace-nowrap");
@@ -59,6 +81,6 @@ describe("CollectionDropdown", () => {
 
   it("keeps explicit hover/open selectors in shell styles", () => {
     expect(shellStyles).toContain(".brand-select-trigger:hover");
-    expect(shellStyles).toContain(".brand-select-trigger[data-state=\"open\"]");
+    expect(shellStyles).toContain('.brand-select-trigger[data-state="open"]');
   });
 });

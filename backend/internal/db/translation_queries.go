@@ -11,6 +11,7 @@ import (
 type TranslationStoryTarget struct {
 	StoryID    int64
 	StoryUUID  string
+	Collection string
 	Title      string
 	SourceLang string
 }
@@ -19,6 +20,7 @@ type TranslationStoryTarget struct {
 type TranslationArticleTarget struct {
 	ArticleID    int64
 	ArticleUUID  string
+	Collection   string
 	Title        string
 	Text         string
 	SourceLang   string
@@ -81,6 +83,7 @@ func (p *Pool) GetTranslationStoryByUUID(ctx context.Context, storyUUID string) 
 SELECT
 	s.story_id,
 	s.story_uuid::text,
+	s.collection,
 	s.canonical_title,
 	COALESCE(rep.normalized_language, 'und') AS source_lang
 FROM news.stories s
@@ -96,6 +99,7 @@ LIMIT 1
 	err := p.QueryRow(ctx, q, strings.TrimSpace(storyUUID)).Scan(
 		&row.StoryID,
 		&row.StoryUUID,
+		&row.Collection,
 		&row.Title,
 		&row.SourceLang,
 	)
@@ -113,6 +117,7 @@ func (p *Pool) ListTranslationStoriesByCollection(ctx context.Context, collectio
 SELECT
 	s.story_id,
 	s.story_uuid::text,
+	s.collection,
 	s.canonical_title,
 	COALESCE(rep.normalized_language, 'und') AS source_lang
 FROM news.stories s
@@ -133,7 +138,7 @@ ORDER BY s.last_seen_at DESC, s.story_id DESC
 	items := make([]TranslationStoryTarget, 0, 64)
 	for rows.Next() {
 		var row TranslationStoryTarget
-		if err := rows.Scan(&row.StoryID, &row.StoryUUID, &row.Title, &row.SourceLang); err != nil {
+		if err := rows.Scan(&row.StoryID, &row.StoryUUID, &row.Collection, &row.Title, &row.SourceLang); err != nil {
 			return nil, fmt.Errorf("scan translation story row: %w", err)
 		}
 		items = append(items, row)
@@ -150,6 +155,7 @@ func (p *Pool) ListTranslationStoryArticles(ctx context.Context, storyID int64) 
 SELECT
 	a.article_id,
 	a.article_uuid::text,
+	a.collection,
 	a.normalized_title,
 	a.normalized_text,
 	a.normalized_language,
@@ -174,6 +180,7 @@ ORDER BY sa.matched_at DESC, a.article_id DESC
 		if err := rows.Scan(
 			&row.ArticleID,
 			&row.ArticleUUID,
+			&row.Collection,
 			&row.Title,
 			&row.Text,
 			&row.SourceLang,
@@ -195,6 +202,7 @@ func (p *Pool) GetTranslationArticleByUUID(ctx context.Context, articleUUID stri
 SELECT
 	a.article_id,
 	a.article_uuid::text,
+	a.collection,
 	a.normalized_title,
 	a.normalized_text,
 	a.normalized_language,
@@ -209,6 +217,7 @@ LIMIT 1
 	err := p.QueryRow(ctx, q, strings.TrimSpace(articleUUID)).Scan(
 		&row.ArticleID,
 		&row.ArticleUUID,
+		&row.Collection,
 		&row.Title,
 		&row.Text,
 		&row.SourceLang,

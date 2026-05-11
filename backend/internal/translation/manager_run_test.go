@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"horse.fit/scoop/internal/db"
@@ -13,12 +14,18 @@ type stubTranslationStore struct {
 	upsertSourceID      int64
 	upsertSourceCalls   []db.UpsertTranslationSourceParams
 	upsertResultCalls   []db.UpsertTranslationResultParams
+	storyRow            db.TranslationStoryTarget
+	articleRow          db.TranslationArticleTarget
+	collectionMode      string
 	lookupCachedResult  *db.CachedTranslationRow
 	lookupCachedErr     error
 	lookupCachedTargets []string
 }
 
 func (s *stubTranslationStore) GetTranslationStoryByUUID(_ context.Context, _ string) (db.TranslationStoryTarget, error) {
+	if s.storyRow.StoryID != 0 {
+		return s.storyRow, nil
+	}
 	return db.TranslationStoryTarget{}, db.ErrNoRows
 }
 
@@ -31,7 +38,17 @@ func (s *stubTranslationStore) ListTranslationStoryArticles(_ context.Context, _
 }
 
 func (s *stubTranslationStore) GetTranslationArticleByUUID(_ context.Context, _ string) (db.TranslationArticleTarget, error) {
+	if s.articleRow.ArticleID != 0 {
+		return s.articleRow, nil
+	}
 	return db.TranslationArticleTarget{}, db.ErrNoRows
+}
+
+func (s *stubTranslationStore) GetCollectionTranslationMode(_ context.Context, collection string) (string, error) {
+	if s.collectionMode != "" {
+		return s.collectionMode, nil
+	}
+	return db.DefaultCollectionTranslationMode(collection), nil
 }
 
 func (s *stubTranslationStore) ListStoryTranslationRows(_ context.Context, _ int64) ([]db.StoryTranslationRow, error) {
@@ -191,5 +208,33 @@ func TestRunTasks_SkipsWhenSourceEqualsTarget(t *testing.T) {
 	}
 	if len(store.upsertResultCalls) != 0 {
 		t.Fatalf("did not expect upsert result calls, got %d", len(store.upsertResultCalls))
+	}
+}
+
+func TestTranslateStoryByUUID_RejectsDisabledCollection(t *testing.T) {
+	t.Parallel()
+
+	store := &stubTranslationStore{
+		storyRow: db.TranslationStoryTarget{
+			StoryID:    42,
+			StoryUUID:  "story-uuid",
+			Collection: "openclaw",
+			Title:      "OpenClaw story",
+			SourceLang: "en",
+		},
+		collectionMode: db.TranslationModeDisabled,
+	}
+	registry := NewRegistry("stub")
+	if err := registry.Register(&stubProvider{name: "stub", resp: TranslateResponse{Text: "ignored"}}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	manager := NewManagerWithStore(store, registry)
+
+	_, err := manager.TranslateStoryByUUID(context.Background(), "story-uuid", RunOptions{TargetLang: "zh", Provider: "stub"})
+	if !errors.Is(err, ErrTranslationDisabled) {
+		t.Fatalf("expected ErrTranslationDisabled, got %v", err)
+	}
+	if len(store.upsertSourceCalls) != 0 {
+		t.Fatalf("did not expect upsert source calls, got %d", len(store.upsertSourceCalls))
 	}
 }

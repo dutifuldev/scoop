@@ -2,6 +2,7 @@ import type {
   LoginResponse,
   MeResponse,
   MySettingsResponse,
+  CollectionSettings,
   CollectionSummary,
   JSendResponse,
   LanguageOption,
@@ -40,7 +41,8 @@ async function fetchJSend<T>(path: string, options: JSendRequestOptions = {}): P
   const isSuccess = payload.status === "success";
 
   if (!response.ok || !isSuccess || payload.data === undefined) {
-    const message = typeof payload.message === "string" ? payload.message : `Request failed (${response.status})`;
+    const message =
+      typeof payload.message === "string" ? payload.message : `Request failed (${response.status})`;
     throw new Error(message);
   }
 
@@ -93,7 +95,9 @@ export async function getMySettings(): Promise<MySettingsResponse> {
   return fetchJSend<MySettingsResponse>("/api/v1/me/settings");
 }
 
-export async function updateMySettings(payload: Partial<UserSettings>): Promise<MySettingsResponse> {
+export async function updateMySettings(
+  payload: Partial<UserSettings>,
+): Promise<MySettingsResponse> {
   return fetchJSend<MySettingsResponse>("/api/v1/me/settings", {
     method: "PUT",
     bodyJson: payload,
@@ -104,7 +108,23 @@ export async function getCollections(): Promise<{ items: CollectionSummary[] }> 
   return fetchJSend<{ items: CollectionSummary[] }>("/api/v1/collections");
 }
 
-export async function getStoryDays(collection: string, limit = 45): Promise<{ items: StoryDayBucket[] }> {
+export async function updateCollectionSettings(
+  collection: string,
+  translationMode: "enabled" | "disabled",
+): Promise<{ settings: CollectionSettings }> {
+  return fetchJSend<{ settings: CollectionSettings }>(
+    `/api/v1/collections/${encodeURIComponent(collection)}/settings`,
+    {
+      method: "PATCH",
+      bodyJson: { translation_mode: translationMode },
+    },
+  );
+}
+
+export async function getStoryDays(
+  collection: string,
+  limit = 45,
+): Promise<{ items: StoryDayBucket[] }> {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   if (collection) {
@@ -144,15 +164,17 @@ export async function requestTranslation(
   provider?: string,
 ): Promise<{ stats: { translated: number; cached: number; skipped: number; total: number } }> {
   const normalizedTargetLang = normalizeLanguageCode(targetLang);
-  const body: Record<string, string> = { story_uuid: storyUUID, target_lang: normalizedTargetLang || targetLang };
+  const body: Record<string, string> = {
+    story_uuid: storyUUID,
+    target_lang: normalizedTargetLang || targetLang,
+  };
   if (provider) body.provider = provider;
-  return fetchJSend<{ stats: { translated: number; cached: number; skipped: number; total: number } }>(
-    "/api/v1/translate",
-    {
-      method: "POST",
-      bodyJson: body,
-    },
-  );
+  return fetchJSend<{
+    stats: { translated: number; cached: number; skipped: number; total: number };
+  }>("/api/v1/translate", {
+    method: "POST",
+    bodyJson: body,
+  });
 }
 
 export async function getStoryArticlePreview(
@@ -161,5 +183,7 @@ export async function getStoryArticlePreview(
 ): Promise<StoryArticlePreview> {
   const params = new URLSearchParams();
   params.set("max_chars", String(maxChars));
-  return fetchJSend<StoryArticlePreview>(`/api/v1/articles/${storyArticleUUID}/preview?${params.toString()}`);
+  return fetchJSend<StoryArticlePreview>(
+    `/api/v1/articles/${storyArticleUUID}/preview?${params.toString()}`,
+  );
 }

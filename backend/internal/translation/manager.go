@@ -254,6 +254,21 @@ func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarg
 		return RunStats{}, err
 	}
 
+	collectionEnabled := map[string]bool{}
+	isArticleCollectionEnabled := func(collection string) (bool, error) {
+		key := strings.ToLower(strings.TrimSpace(collection))
+		if enabled, ok := collectionEnabled[key]; ok {
+			return enabled, nil
+		}
+		mode, err := m.store.GetCollectionTranslationMode(ctx, collection)
+		if err != nil {
+			return false, err
+		}
+		enabled := db.IsCollectionTranslationEnabled(mode)
+		collectionEnabled[key] = enabled
+		return enabled, nil
+	}
+
 	tasks := make([]translationTask, 0, 1+(2*len(articles)))
 	if strings.TrimSpace(story.Title) != "" {
 		tasks = append(tasks, translationTask{
@@ -266,6 +281,14 @@ func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarg
 	}
 
 	for _, article := range articles {
+		enabled, err := isArticleCollectionEnabled(article.Collection)
+		if err != nil {
+			return RunStats{}, err
+		}
+		if !enabled {
+			continue
+		}
+
 		if strings.TrimSpace(article.Title) != "" {
 			tasks = append(tasks, translationTask{
 				SourceType:    SourceTypeArticleTitle,

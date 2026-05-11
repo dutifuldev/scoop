@@ -94,14 +94,13 @@ func runTagsList(args []string) int {
 	rows := make([][]string, 0, len(tags))
 	for _, tag := range tags {
 		rows = append(rows, []string{
-			tag.Slug,
-			tag.Name,
+			tag.Tag,
 			pointerStringOrEmpty(tag.Color),
 			formatUTCTimestampPtr(tag.ArchivedAt),
 			formatUTCTimestamp(tag.CreatedAt),
 		})
 	}
-	if err := writeTable([]string{"slug", "name", "color", "archived_at", "created_at"}, rows); err != nil {
+	if err := writeTable([]string{"tag", "color", "archived_at", "created_at"}, rows); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
 		return 1
 	}
@@ -110,7 +109,7 @@ func runTagsList(args []string) int {
 
 func runTagsCreate(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag slug is required")
+		fmt.Fprintln(os.Stderr, "tag is required")
 		return 2
 	}
 	slug := args[0]
@@ -120,7 +119,6 @@ func runTagsCreate(args []string) int {
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	name := fs.String("name", "", "Display name")
 	description := fs.String("description", "", "Description")
 	color := fs.String("color", "", "Tag color as #RRGGBB")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -130,7 +128,7 @@ func runTagsCreate(args []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "tags create accepts only one slug")
+		fmt.Fprintln(os.Stderr, "tags create accepts only one tag")
 		return 2
 	}
 	if _, err := parseOutputFormat(*format, outputFormatTable); err != nil {
@@ -155,7 +153,6 @@ func runTagsCreate(args []string) int {
 	}
 	tag, err := pool.CreateTag(ctx, db.UpsertTagOptions{
 		Slug:        slug,
-		Name:        *name,
 		Description: descriptionPtr,
 		Color:       colorPtr,
 	}, globaltime.UTC())
@@ -168,7 +165,7 @@ func runTagsCreate(args []string) int {
 
 func runTagsRename(args []string) int {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: scoop tags rename <old-slug> <new-slug>")
+		fmt.Fprintln(os.Stderr, "usage: scoop tags rename <old-tag> <new-tag>")
 		return 2
 	}
 	fs := flag.NewFlagSet("tags rename", flag.ContinueOnError)
@@ -191,7 +188,7 @@ func runTagsRename(args []string) int {
 
 func runTagsUpdate(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag slug is required")
+		fmt.Fprintln(os.Stderr, "tag is required")
 		return 2
 	}
 	slug := args[0]
@@ -200,7 +197,6 @@ func runTagsUpdate(args []string) int {
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	name := fs.String("name", "", "Display name")
 	description := fs.String("description", "", "Description")
 	color := fs.String("color", "", "Tag color as #RRGGBB")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -210,9 +206,6 @@ func runTagsUpdate(args []string) int {
 		return 2
 	}
 	opts := db.UpdateTagOptions{}
-	if *name != "" {
-		opts.Name = name
-	}
 	if *description != "" {
 		opts.Description = description
 	}
@@ -253,7 +246,7 @@ func updateTag(slug string, opts db.UpdateTagOptions, timeout time.Duration, env
 
 func runTagsArchive(args []string, archived bool) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag slug is required")
+		fmt.Fprintln(os.Stderr, "tag is required")
 		return 2
 	}
 	slug := args[0]
@@ -298,7 +291,7 @@ func runTagsArchive(args []string, archived bool) int {
 
 func runTagsDelete(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag slug is required")
+		fmt.Fprintln(os.Stderr, "tag is required")
 		return 2
 	}
 	slug := args[0]
@@ -345,7 +338,7 @@ func runTagsRemoveArticle(args []string) int {
 
 func runTagsArticleMutation(args []string, add bool) int {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: scoop tags add-article <article_uuid> <tag_slug>")
+		fmt.Fprintln(os.Stderr, "usage: scoop tags add-article <article_uuid> <tag>")
 		return 2
 	}
 	articleUUID := args[0]
@@ -406,12 +399,11 @@ func printTagResult(tag *db.TagRecord, rawFormat string) int {
 		return 0
 	}
 	rows := [][]string{{
-		tag.Slug,
-		tag.Name,
+		tag.Tag,
 		pointerStringOrEmpty(tag.Color),
 		formatUTCTimestampPtr(tag.ArchivedAt),
 	}}
-	if err := writeTable([]string{"slug", "name", "color", "archived_at"}, rows); err != nil {
+	if err := writeTable([]string{"tag", "color", "archived_at"}, rows); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
 		return 1
 	}
@@ -421,12 +413,12 @@ func printTagResult(tag *db.TagRecord, rawFormat string) int {
 func printTagsUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  scoop tags list [--include-archived] [--format table|json]")
-	fmt.Fprintln(os.Stderr, "  scoop tags create <slug> --name <name> [--description <text>] [--color <hex>]")
-	fmt.Fprintln(os.Stderr, "  scoop tags rename <old-slug> <new-slug>")
-	fmt.Fprintln(os.Stderr, "  scoop tags update <slug> [--name <name>] [--description <text>] [--color <hex>]")
-	fmt.Fprintln(os.Stderr, "  scoop tags archive <slug>")
-	fmt.Fprintln(os.Stderr, "  scoop tags unarchive <slug>")
-	fmt.Fprintln(os.Stderr, "  scoop tags delete <slug>")
-	fmt.Fprintln(os.Stderr, "  scoop tags add-article <article_uuid> <tag_slug>")
-	fmt.Fprintln(os.Stderr, "  scoop tags remove-article <article_uuid> <tag_slug>")
+	fmt.Fprintln(os.Stderr, "  scoop tags create <tag> [--description <text>] [--color <hex>]")
+	fmt.Fprintln(os.Stderr, "  scoop tags rename <old-tag> <new-tag>")
+	fmt.Fprintln(os.Stderr, "  scoop tags update <tag> [--description <text>] [--color <hex>]")
+	fmt.Fprintln(os.Stderr, "  scoop tags archive <tag>")
+	fmt.Fprintln(os.Stderr, "  scoop tags unarchive <tag>")
+	fmt.Fprintln(os.Stderr, "  scoop tags delete <tag>")
+	fmt.Fprintln(os.Stderr, "  scoop tags add-article <article_uuid> <tag>")
+	fmt.Fprintln(os.Stderr, "  scoop tags remove-article <article_uuid> <tag>")
 }

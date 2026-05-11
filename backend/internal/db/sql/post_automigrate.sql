@@ -160,6 +160,54 @@ CREATE INDEX IF NOT EXISTS idx_article_tags_tag_article
 CREATE INDEX IF NOT EXISTS idx_tags_archived_slug
 	ON news.tags (archived_at, slug);
 
+DO $$
+DECLARE
+	tag_row record;
+	canonical_base text;
+	candidate text;
+	suffix bigint;
+BEGIN
+	FOR tag_row IN
+		SELECT tag_id, slug
+		FROM news.tags
+		WHERE slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$'
+		ORDER BY tag_id
+	LOOP
+		canonical_base := trim(both '-' from left(trim(both '-' from regexp_replace(regexp_replace(lower(trim(tag_row.slug)), '[^a-z0-9-]+', '-', 'g'), '-+', '-', 'g')), 48));
+		IF canonical_base = '' THEN
+			canonical_base := 'tag';
+		END IF;
+
+		candidate := canonical_base;
+		suffix := tag_row.tag_id;
+		WHILE EXISTS (
+			SELECT 1
+			FROM news.tags
+			WHERE slug = candidate
+				AND tag_id <> tag_row.tag_id
+		) LOOP
+			candidate := left(canonical_base, greatest(1, 63 - length(suffix::text))) || '-' || suffix::text;
+			suffix := suffix + 1;
+		END LOOP;
+
+		UPDATE news.tags
+		SET slug = candidate,
+			name = candidate
+		WHERE tag_id = tag_row.tag_id;
+	END LOOP;
+
+	UPDATE news.tags
+	SET name = slug
+	WHERE name IS DISTINCT FROM slug;
+
+	ALTER TABLE news.tags DROP CONSTRAINT IF EXISTS ck_tags_slug_canonical;
+	ALTER TABLE news.tags
+		ADD CONSTRAINT ck_tags_slug_canonical
+		CHECK (length(slug) <= 64 AND slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$')
+		NOT VALID;
+END
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_article_embeddings_article
 	ON news.article_embeddings (article_id);
 
@@ -466,7 +514,7 @@ BEGIN
 			AND conrelid = 'news.tags'::regclass
 	) THEN
 		ALTER TABLE news.tags
-			ADD CONSTRAINT tags_slug_check CHECK (slug ~ '^[a-z0-9][a-z0-9_-]{0,63}$');
+			ADD CONSTRAINT tags_slug_check CHECK (length(slug) <= 64 AND slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$');
 	END IF;
 
 	IF NOT EXISTS (
@@ -477,6 +525,16 @@ BEGIN
 	) THEN
 		ALTER TABLE news.tags
 			ADD CONSTRAINT tags_name_check CHECK (length(trim(name)) > 0);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'tags_name_canonical'
+			AND conrelid = 'news.tags'::regclass
+	) THEN
+		ALTER TABLE news.tags
+			ADD CONSTRAINT tags_name_canonical CHECK (name = slug) NOT VALID;
 	END IF;
 
 	IF NOT EXISTS (

@@ -174,7 +174,7 @@ export async function getStoryDetail(storyUUID: string, lang = ""): Promise<Stor
 export async function addArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
   await fetchJSend(`/api/v1/articles/${encodeURIComponent(articleUUID)}/tags`, {
     method: "POST",
-    bodyJson: { tag_slug: tagSlug },
+    bodyJson: { tag: tagSlug },
   });
 }
 

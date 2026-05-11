@@ -9,13 +9,14 @@ import (
 	"time"
 )
 
-var tagSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var tagPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 type TagRecord struct {
 	TagID       int64      `json:"tag_id"`
 	TagUUID     string     `json:"tag_uuid"`
-	Slug        string     `json:"slug"`
-	Name        string     `json:"name"`
+	Tag         string     `json:"tag"`
+	Slug        string     `json:"-"`
+	Name        string     `json:"-"`
 	Description *string    `json:"description,omitempty"`
 	Color       *string    `json:"color,omitempty"`
 	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
@@ -25,14 +26,12 @@ type TagRecord struct {
 
 type UpsertTagOptions struct {
 	Slug        string
-	Name        string
 	Description *string
 	Color       *string
 }
 
 type UpdateTagOptions struct {
 	NewSlug     *string
-	Name        *string
 	Description *string
 	Color       *string
 }
@@ -44,10 +43,13 @@ func NormalizeTagSlug(raw string) string {
 func ValidateTagSlug(slug string) error {
 	normalized := NormalizeTagSlug(slug)
 	if normalized == "" {
-		return fmt.Errorf("tag slug is required")
+		return fmt.Errorf("tag is required")
 	}
-	if !tagSlugPattern.MatchString(normalized) {
-		return fmt.Errorf("tag slug must start with a lowercase letter or digit and contain only lowercase letters, digits, _ or -")
+	if len(normalized) > 64 {
+		return fmt.Errorf("tag must be 64 characters or fewer")
+	}
+	if !tagPattern.MatchString(normalized) {
+		return fmt.Errorf("tag must contain only lowercase letters, numbers, and single dashes")
 	}
 	return nil
 }
@@ -106,6 +108,7 @@ ORDER BY archived_at NULLS FIRST, slug
 		); err != nil {
 			return nil, fmt.Errorf("scan tag: %w", err)
 		}
+		tag.Tag = tag.Slug
 		tags = append(tags, tag)
 	}
 	if err := rows.Err(); err != nil {
@@ -118,10 +121,6 @@ func (p *Pool) CreateTag(ctx context.Context, opts UpsertTagOptions, now time.Ti
 	slug := NormalizeTagSlug(opts.Slug)
 	if err := ValidateTagSlug(slug); err != nil {
 		return nil, err
-	}
-	name := strings.TrimSpace(opts.Name)
-	if name == "" {
-		return nil, fmt.Errorf("tag name is required")
 	}
 	description := normalizeOptionalString(opts.Description)
 	color, err := normalizeOptionalColor(opts.Color)
@@ -140,13 +139,12 @@ INSERT INTO news.tags (slug, name, description, color, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $5)
 RETURNING tag_id, tag_uuid::text, slug, name, description, color, archived_at, created_at, updated_at
 `
-	tag, err := scanTag(tx.QueryRow(ctx, q, slug, name, description, color, now.UTC()))
+	tag, err := scanTag(tx.QueryRow(ctx, q, slug, slug, description, color, now.UTC()))
 	if err != nil {
 		return nil, fmt.Errorf("create tag: %w", err)
 	}
 	if err := insertAuditEvent(ctx, tx, nil, "tag.create", "tag", tag.Slug, map[string]any{
-		"slug": tag.Slug,
-		"name": tag.Name,
+		"tag": tag.Slug,
 	}); err != nil {
 		return nil, err
 	}
@@ -165,7 +163,7 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 	set := make([]string, 0, 5)
 	args := []any{normalizedSlug}
 	argPos := 2
-	details := map[string]any{"old_slug": normalizedSlug}
+	details := map[string]any{"old_tag": normalizedSlug}
 
 	if opts.NewSlug != nil {
 		newSlug := NormalizeTagSlug(*opts.NewSlug)
@@ -174,17 +172,10 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 		}
 		set = append(set, fmt.Sprintf("slug = $%d", argPos))
 		args = append(args, newSlug)
-		details["new_slug"] = newSlug
+		details["new_tag"] = newSlug
 		argPos++
-	}
-	if opts.Name != nil {
-		name := strings.TrimSpace(*opts.Name)
-		if name == "" {
-			return nil, fmt.Errorf("tag name must not be empty")
-		}
 		set = append(set, fmt.Sprintf("name = $%d", argPos))
-		args = append(args, name)
-		details["name"] = name
+		args = append(args, newSlug)
 		argPos++
 	}
 	if opts.Description != nil {
@@ -270,7 +261,7 @@ RETURNING tag_id, tag_uuid::text, slug, name, description, color, archived_at, c
 		action = "tag.archive"
 	}
 	if err := insertAuditEvent(ctx, tx, nil, action, "tag", tag.Slug, map[string]any{
-		"slug":     tag.Slug,
+		"tag":      tag.Slug,
 		"archived": archived,
 	}); err != nil {
 		return nil, err
@@ -311,7 +302,7 @@ func (p *Pool) DeleteTag(ctx context.Context, slug string) error {
 		return fmt.Errorf("delete tag: %w", err)
 	}
 	if err := insertAuditEvent(ctx, tx, nil, "tag.delete", "tag", normalizedSlug, map[string]any{
-		"slug": normalizedSlug,
+		"tag": normalizedSlug,
 	}); err != nil {
 		return err
 	}
@@ -354,7 +345,7 @@ ON CONFLICT (article_id, tag_id) DO NOTHING
 	if tag.RowsAffected() > 0 {
 		if err := insertAuditEvent(ctx, tx, actorUserID, "article_tag.add", "article", normalizedArticleUUID, map[string]any{
 			"article_uuid": normalizedArticleUUID,
-			"tag_slug":     normalizedSlug,
+			"tag":          normalizedSlug,
 		}); err != nil {
 			return err
 		}
@@ -393,7 +384,7 @@ func (p *Pool) RemoveArticleTag(ctx context.Context, articleUUID string, slug st
 	if tag.RowsAffected() > 0 {
 		if err := insertAuditEvent(ctx, tx, actorUserID, "article_tag.remove", "article", normalizedArticleUUID, map[string]any{
 			"article_uuid": normalizedArticleUUID,
-			"tag_slug":     normalizedSlug,
+			"tag":          normalizedSlug,
 		}); err != nil {
 			return err
 		}
@@ -473,6 +464,7 @@ func scanTag(row *Row) (*TagRecord, error) {
 	); err != nil {
 		return nil, err
 	}
+	tag.Tag = tag.Slug
 	return &tag, nil
 }
 
@@ -494,6 +486,7 @@ func scanTagFromRows(rows *Rows, prefixDest ...any) (TagRecord, error) {
 	if err := rows.Scan(dest...); err != nil {
 		return TagRecord{}, fmt.Errorf("scan tag row: %w", err)
 	}
+	tag.Tag = tag.Slug
 	return tag, nil
 }
 

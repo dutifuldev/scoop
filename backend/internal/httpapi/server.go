@@ -362,7 +362,7 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.PATCH("/articles/:article_uuid", s.handleUpdateArticle)
 	protected.POST("/articles/:article_uuid/restore", s.handleRestoreArticle)
 	protected.POST("/articles/:article_uuid/tags", s.handleAddArticleTag)
-	protected.DELETE("/articles/:article_uuid/tags/:tag_slug", s.handleRemoveArticleTag)
+	protected.DELETE("/articles/:article_uuid/tags/:tag", s.handleRemoveArticleTag)
 	protected.GET("/articles/:story_article_uuid/preview", s.handleStoryArticlePreview)
 
 	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)

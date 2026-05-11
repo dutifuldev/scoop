@@ -11,6 +11,8 @@ Scoop should support manual article tags, but tags should come from a controlled
 
 Users should be able to add or remove existing tags on articles. Creating, renaming, archiving, or deleting tags should be done through the CLI, not through the normal app UI.
 
+Tags have one canonical value. The same value is used for identity, display, CLI input, API input, and filtering.
+
 Scoop does not currently have real admin roles. It has users and sessions, plus a bootstrap user named `admin`, but the app does not distinguish admin users from normal users yet. The first version of tags can avoid this problem by making tag-list management CLI-only.
 
 ## Goals
@@ -50,6 +52,21 @@ CLI-only tag-list actions are:
 
 Used tags should usually be archived instead of deleted, so old articles still make sense.
 
+Tag values use GitHub-style plain names:
+
+- lowercase letters
+- numbers
+- single dashes
+- no spaces
+- no underscores
+- no leading or trailing dash
+
+Examples:
+
+- `openclaw`
+- `needs-review`
+- `metal-news`
+
 ## CLI Shape
 
 Tag list management should start in the CLI.
@@ -57,19 +74,19 @@ Tag list management should start in the CLI.
 Suggested commands:
 
 - `scoop tags list`
-- `scoop tags create <slug> --name <name> [--color <hex>]`
-- `scoop tags rename <old-slug> <new-slug>`
-- `scoop tags update <slug> [--name <name>] [--color <hex>]`
-- `scoop tags archive <slug>`
-- `scoop tags unarchive <slug>`
-- `scoop tags delete <slug>`
+- `scoop tags create <tag> [--color <hex>]`
+- `scoop tags rename <old-tag> <new-tag>`
+- `scoop tags update <tag> [--color <hex>]`
+- `scoop tags archive <tag>`
+- `scoop tags unarchive <tag>`
+- `scoop tags delete <tag>`
 
 `delete` should fail if the tag is attached to any article.
 
 Article tag operations can also exist in the CLI:
 
-- `scoop tags add-article <article_uuid> <tag_slug>`
-- `scoop tags remove-article <article_uuid> <tag_slug>`
+- `scoop tags add-article <article_uuid> <tag>`
+- `scoop tags remove-article <article_uuid> <tag>`
 
 ## Permission Model
 
@@ -131,8 +148,7 @@ Allowed tag definitions.
 
 - `tag_id`
 - `tag_uuid`
-- `slug`
-- `name`
+- `tag`
 - `description`
 - `color`
 - `archived_at`
@@ -195,15 +211,15 @@ Tag list management should stay CLI-only in the first version.
 These API routes should be deferred until the app has roles or temporary grants:
 
 - `POST /api/v1/tags`
-- `PATCH /api/v1/tags/:tag_slug`
-- `POST /api/v1/tags/:tag_slug/archive`
-- `POST /api/v1/tags/:tag_slug/unarchive`
-- `DELETE /api/v1/tags/:tag_slug`
+- `PATCH /api/v1/tags/:tag`
+- `POST /api/v1/tags/:tag/archive`
+- `POST /api/v1/tags/:tag/unarchive`
+- `DELETE /api/v1/tags/:tag`
 
 Article tagging:
 
 - `POST /api/v1/articles/:article_uuid/tags`
-- `DELETE /api/v1/articles/:article_uuid/tags/:tag_slug`
+- `DELETE /api/v1/articles/:article_uuid/tags/:tag`
 
 Temporary grants:
 
@@ -213,6 +229,8 @@ Temporary grants:
 ## UI Shape
 
 The article detail view should let users add or remove existing tags.
+
+Adding a tag should be a compact typeahead input: click the tag area, type, and select an existing tag. Pressing Enter can add an exact existing match.
 
 The article detail view should not allow creating new tags.
 

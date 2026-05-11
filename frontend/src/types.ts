@@ -24,8 +24,7 @@ export interface StoryRepresentative {
 export interface Tag {
   tag_id: number;
   tag_uuid: string;
-  slug: string;
-  name: string;
+  tag: string;
   description?: string | null;
   color?: string | null;
   archived_at?: string | null;

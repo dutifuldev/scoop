@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -310,5 +311,50 @@ Evidence:
     expect(vi.mocked(requestTranslation)).not.toHaveBeenCalled();
     expect(vi.mocked(addArticleTag)).not.toHaveBeenCalled();
     expect(vi.mocked(removeArticleTag)).not.toHaveBeenCalled();
+  });
+
+  it("adds an existing tag from the typeahead input", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-1"
+          selectedItemUUID=""
+          detail={makeDetail()}
+          availableTags={[
+            {
+              tag_id: 1,
+              tag_uuid: "tag-uuid-1",
+              tag: "needs-review",
+              color: "#4EA1FF",
+              created_at: "2026-02-14T09:00:00Z",
+              updated_at: "2026-02-14T09:00:00Z",
+            },
+          ]}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const [firstTagInput] = await screen.findAllByLabelText("Add article tag");
+    await user.click(firstTagInput);
+    await user.type(firstTagInput, "NEEDS");
+    expect(firstTagInput).toHaveValue("needs");
+
+    await user.click(screen.getByRole("option", { name: "needs-review" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(addArticleTag)).toHaveBeenCalledWith("doc-1", "needs-review");
+    });
   });
 });

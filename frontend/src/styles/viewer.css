@@ -451,7 +451,7 @@
   }
 
   .member-tag-tools {
-    @apply mt-2 flex flex-wrap items-center gap-2;
+    @apply mt-2;
   }
 
   .member-tag-row {
@@ -466,8 +466,38 @@
     @apply font-mono text-[0.7rem] text-panel-500;
   }
 
-  .member-tag-add-trigger {
-    @apply h-7 w-[118px] border-panel-500 bg-panel-700 px-2 text-[0.74rem] text-panel-100;
+  .member-tag-input-shell {
+    @apply flex min-h-8 w-full max-w-[520px] flex-wrap items-center gap-1.5 rounded-[10px] border border-panel-500 bg-panel-700/50 px-2 py-1.5 transition-colors duration-150;
+  }
+
+  .member-tag-input-shell.is-active {
+    @apply border-brand-500/60 ring-2 ring-brand-500/25;
+  }
+
+  .member-tag-input-wrap {
+    @apply relative min-w-[104px] flex-1;
+  }
+
+  .member-tag-input {
+    @apply h-6 min-w-[104px] border-0 bg-transparent px-1 py-0 font-mono text-[0.74rem] text-panel-100 placeholder:text-panel-500 focus-visible:ring-0;
+  }
+
+  .member-tag-suggestions {
+    @apply absolute left-0 top-[calc(100%+6px)] z-30 grid min-w-[160px] gap-1 rounded-[10px] border border-panel-500 bg-panel-800 p-1.5 shadow-xl;
+  }
+
+  .member-tag-suggestion {
+    --tag-color: #f8a550;
+    @apply flex min-h-7 w-full items-center rounded-[7px] border px-2 text-left font-mono text-[0.72rem] font-semibold transition-colors duration-150;
+    border-color: color-mix(in srgb, var(--tag-color) 32%, transparent);
+    background: color-mix(in srgb, var(--tag-color) 10%, transparent);
+    color: color-mix(in srgb, var(--tag-color) 78%, white);
+  }
+
+  .member-tag-suggestion:hover,
+  .member-tag-suggestion:focus-visible {
+    outline: none;
+    background: color-mix(in srgb, var(--tag-color) 18%, transparent);
   }
 
   .tag-chip {

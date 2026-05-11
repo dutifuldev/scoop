@@ -15,7 +15,7 @@ import {
 } from "../lib/collectionTranslation";
 import { buildMemberSubtitle, formatDateTime } from "../lib/viewerFormat";
 import type { StoryDetailResponse, StoryArticlePreview, StoryArticle, Tag } from "../types";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Input } from "./ui/input";
 
 interface StoryDetailPanelProps {
   selectedStoryUUID: string;
@@ -194,6 +194,14 @@ function tagChipStyle(tag: Tag): CSSProperties | undefined {
   return tag.color ? ({ "--tag-color": tag.color } as CSSProperties) : undefined;
 }
 
+function normalizeTagInput(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 64);
+}
+
 export function StoryDetailPanel({
   selectedStoryUUID,
   selectedItemUUID,
@@ -224,9 +232,12 @@ export function StoryDetailPanel({
   const [translationError, setTranslationError] = useState("");
   const [tagMutationKey, setTagMutationKey] = useState("");
   const [tagMutationError, setTagMutationError] = useState("");
+  const [activeTagArticleUUID, setActiveTagArticleUUID] = useState("");
+  const [tagInputValue, setTagInputValue] = useState("");
   const translationRequestedRef = useRef<string>("");
   const activeTranslationKeyRef = useRef<string>("");
   const previousStoryUUIDRef = useRef<string>("");
+  const tagInputBlurTimerRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
   const hasPendingTranslations = useMemo(() => {
     if (!activeLang || !detail) {
@@ -300,6 +311,19 @@ export function StoryDetailPanel({
   useEffect(() => {
     setTranslationError("");
   }, [selectedStoryUUID, activeLang]);
+
+  useEffect(() => {
+    setActiveTagArticleUUID("");
+    setTagInputValue("");
+  }, [selectedStoryUUID]);
+
+  useEffect(() => {
+    return () => {
+      if (tagInputBlurTimerRef.current !== null) {
+        window.clearTimeout(tagInputBlurTimerRef.current);
+      }
+    };
+  }, []);
 
   const memberGroups = useMemo<MemberURLGroup[]>(() => {
     if (!detail) {
@@ -523,6 +547,7 @@ export function StoryDetailPanel({
     setTagMutationError("");
     try {
       await addArticleTag(articleUUID, tagSlug);
+      setTagInputValue("");
       await refreshTagsAfterMutation();
     } catch (err) {
       setTagMutationError(err instanceof Error ? err.message : "Failed to add tag.");
@@ -551,59 +576,115 @@ export function StoryDetailPanel({
 
   function renderArticleTags(member: StoryArticle): JSX.Element {
     const currentTags = member.tags ?? [];
-    const currentSlugs = new Set(currentTags.map((tag) => tag.slug));
-    const addableTags = availableTags.filter((tag) => !currentSlugs.has(tag.slug));
+    const currentTagsSet = new Set(currentTags.map((tag) => tag.tag));
+    const addableTags = availableTags.filter((tag) => !currentTagsSet.has(tag.tag));
+    const isInputActive = activeTagArticleUUID === member.article_uuid;
+    const normalizedInputValue = isInputActive ? tagInputValue : "";
+    const visibleSuggestions = addableTags
+      .filter((tag) => !normalizedInputValue || tag.tag.includes(normalizedInputValue))
+      .slice(0, 8);
+    const exactTag = addableTags.find((tag) => tag.tag === normalizedInputValue);
+    const hasSuggestions = isInputActive && visibleSuggestions.length > 0;
 
     return (
       <div className="member-tag-tools">
-        <div className="member-tag-row" aria-label="Article tags">
-          {currentTags.length > 0 ? (
-            currentTags.map((tag) => {
-              const mutationKey = `${member.article_uuid}:${tag.slug}:remove`;
-              return (
-                <span key={tag.slug} className="tag-chip" style={tagChipStyle(tag)}>
-                  {tag.name}
-                  <button
-                    type="button"
-                    className="tag-chip-remove"
-                    onClick={() => {
-                      void onRemoveArticleTag(member.article_uuid, tag.slug);
-                    }}
-                    disabled={tagMutationKey === mutationKey}
-                    aria-label={`Remove ${tag.name} tag`}
-                  >
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </span>
-              );
-            })
-          ) : (
-            <span className="member-tag-empty">No tags</span>
-          )}
+        <div
+          className={`member-tag-input-shell ${isInputActive ? "is-active" : ""}`.trim()}
+          aria-label="Article tags"
+          onMouseDown={() => {
+            if (tagInputBlurTimerRef.current !== null) {
+              window.clearTimeout(tagInputBlurTimerRef.current);
+              tagInputBlurTimerRef.current = null;
+            }
+          }}
+        >
+          {currentTags.map((tag) => {
+            const mutationKey = `${member.article_uuid}:${tag.tag}:remove`;
+            return (
+              <span key={tag.tag} className="tag-chip" style={tagChipStyle(tag)}>
+                {tag.tag}
+                <button
+                  type="button"
+                  className="tag-chip-remove"
+                  onClick={() => {
+                    void onRemoveArticleTag(member.article_uuid, tag.tag);
+                  }}
+                  disabled={tagMutationKey === mutationKey}
+                  aria-label={`Remove ${tag.tag} tag`}
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </span>
+            );
+          })}
+          {addableTags.length > 0 ? (
+            <div className="member-tag-input-wrap">
+              <Input
+                value={normalizedInputValue}
+                onFocus={() => {
+                  if (tagInputBlurTimerRef.current !== null) {
+                    window.clearTimeout(tagInputBlurTimerRef.current);
+                    tagInputBlurTimerRef.current = null;
+                  }
+                  setActiveTagArticleUUID(member.article_uuid);
+                }}
+                onBlur={() => {
+                  tagInputBlurTimerRef.current = window.setTimeout(() => {
+                    setActiveTagArticleUUID("");
+                    setTagInputValue("");
+                  }, 120);
+                }}
+                onChange={(event) => {
+                  setActiveTagArticleUUID(member.article_uuid);
+                  setTagInputValue(normalizeTagInput(event.target.value));
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    if (exactTag) {
+                      void onAddArticleTag(member.article_uuid, exactTag.tag);
+                    }
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    setActiveTagArticleUUID("");
+                    setTagInputValue("");
+                  }
+                }}
+                className="member-tag-input"
+                placeholder={currentTags.length > 0 ? "Add tag" : "Add tag"}
+                aria-label="Add article tag"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {hasSuggestions ? (
+                <div className="member-tag-suggestions" role="listbox" aria-label="Matching tags">
+                  {visibleSuggestions.map((tag) => {
+                    const mutationKey = `${member.article_uuid}:${tag.tag}:add`;
+                    return (
+                      <button
+                        key={tag.tag}
+                        type="button"
+                        className="member-tag-suggestion"
+                        style={tagChipStyle(tag)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          void onAddArticleTag(member.article_uuid, tag.tag);
+                        }}
+                        disabled={tagMutationKey === mutationKey}
+                        role="option"
+                      >
+                        {tag.tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : currentTags.length === 0 ? (
+            <span className="member-tag-empty">No tags available</span>
+          ) : null}
         </div>
-
-        {addableTags.length > 0 ? (
-          <Select
-            value="__add_tag__"
-            onValueChange={(value) => {
-              void onAddArticleTag(member.article_uuid, value);
-            }}
-          >
-            <SelectTrigger className="member-tag-add-trigger" aria-label="Add article tag">
-              <SelectValue placeholder="Add tag" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__add_tag__" disabled>
-                Add tag
-              </SelectItem>
-              {addableTags.map((tag) => (
-                <SelectItem key={tag.slug} value={tag.slug}>
-                  {tag.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : null}
       </div>
     );
   }

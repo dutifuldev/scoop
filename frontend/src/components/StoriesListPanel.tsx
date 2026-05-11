@@ -217,8 +217,8 @@ export function StoriesListPanel({
                 <SelectContent>
                   <SelectItem value="__all_tags__">All tags</SelectItem>
                   {availableTags.map((tag) => (
-                    <SelectItem key={tag.slug} value={tag.slug}>
-                      {tag.name}
+                    <SelectItem key={tag.tag} value={tag.tag}>
+                      {tag.tag}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -284,7 +284,7 @@ export function StoriesListPanel({
                       <div className="story-tag-row" aria-label="Story tags">
                         {story.tags.map((tag) => (
                           <span
-                            key={tag.slug}
+                            key={tag.tag}
                             className="tag-chip tag-chip-small"
                             style={
                               tag.color
@@ -292,7 +292,7 @@ export function StoriesListPanel({
                                 : undefined
                             }
                           >
-                            {tag.name}
+                            {tag.tag}
                           </span>
                         ))}
                       </div>

@@ -11,7 +11,7 @@ import (
 )
 
 type articleTagRequest struct {
-	TagSlug string `json:"tag_slug"`
+	Tag string `json:"tag"`
 }
 
 func (s *Server) handleTags(c echo.Context) error {
@@ -34,9 +34,9 @@ func (s *Server) handleAddArticleTag(c echo.Context) error {
 	if err := decodeJSONBody(c, &req); err != nil {
 		return failValidation(c, map[string]string{"body": err.Error()})
 	}
-	tagSlug := db.NormalizeTagSlug(req.TagSlug)
+	tagSlug := db.NormalizeTagSlug(req.Tag)
 	if err := db.ValidateTagSlug(tagSlug); err != nil {
-		return failValidation(c, map[string]string{"tag_slug": err.Error()})
+		return failValidation(c, map[string]string{"tag": err.Error()})
 	}
 
 	principal, ok := principalFromContext(c)
@@ -51,10 +51,10 @@ func (s *Server) handleAddArticleTag(c echo.Context) error {
 		if msg := mutationValidationMessage(err); msg != "" {
 			return failValidation(c, map[string]string{"article_uuid": msg})
 		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag_slug", tagSlug).Msg("add article tag failed")
+		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag", tagSlug).Msg("add article tag failed")
 		return internalError(c, "Failed to add article tag")
 	}
-	return success(c, map[string]any{"article_uuid": articleUUID, "tag_slug": tagSlug})
+	return success(c, map[string]any{"article_uuid": articleUUID, "tag": tagSlug})
 }
 
 func (s *Server) handleRemoveArticleTag(c echo.Context) error {
@@ -62,9 +62,9 @@ func (s *Server) handleRemoveArticleTag(c echo.Context) error {
 	if articleUUID == "" {
 		return failValidation(c, map[string]string{"article_uuid": "is required"})
 	}
-	tagSlug := db.NormalizeTagSlug(c.Param("tag_slug"))
+	tagSlug := db.NormalizeTagSlug(c.Param("tag"))
 	if err := db.ValidateTagSlug(tagSlug); err != nil {
-		return failValidation(c, map[string]string{"tag_slug": err.Error()})
+		return failValidation(c, map[string]string{"tag": err.Error()})
 	}
 
 	principal, ok := principalFromContext(c)
@@ -79,8 +79,8 @@ func (s *Server) handleRemoveArticleTag(c echo.Context) error {
 		if msg := mutationValidationMessage(err); msg != "" {
 			return failValidation(c, map[string]string{"article_uuid": msg})
 		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag_slug", tagSlug).Msg("remove article tag failed")
+		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag", tagSlug).Msg("remove article tag failed")
 		return internalError(c, "Failed to remove article tag")
 	}
-	return success(c, map[string]any{"article_uuid": articleUUID, "tag_slug": tagSlug})
+	return success(c, map[string]any{"article_uuid": articleUUID, "tag": tagSlug})
 }

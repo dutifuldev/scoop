@@ -174,7 +174,6 @@ export function StoryTitleCopyButton({
         void copyStoryLink();
       }}
       title={statusText}
-      aria-label={statusText}
     >
       {displayTitle}
     </button>

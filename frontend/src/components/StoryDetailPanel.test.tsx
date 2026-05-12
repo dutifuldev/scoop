@@ -295,13 +295,15 @@ describe("StoryDetailPanel", () => {
       configurable: true,
       value: { writeText },
     });
-    await user.click(screen.getByRole("button", { name: "Copy story link" }));
+    const titleButton = screen.getByRole("button", { name: "Solo Story" });
+    expect(titleButton).toHaveAttribute("title", "Copy story link");
+    await user.click(titleButton);
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         expect.stringContaining("/c/openclaw/s/story-uuid-single"),
       ),
     );
-    expect(screen.getByRole("button", { name: "Copied story link" })).toBeInTheDocument();
+    expect(titleButton).toHaveAttribute("title", "Copied story link");
 
     await user.click(screen.getByRole("button", { name: "Add article tag" }));
 

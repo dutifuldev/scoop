@@ -13,7 +13,7 @@ import type { StoryDetailResponse, StoryArticle, Tag } from "../types";
 import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
 import {
   buildMemberPreview,
-  DiscordLinkIcon,
+  DiscordMessageLink,
   discordMessagePattern,
   labelForURL,
   renderTextBlock,
@@ -471,18 +471,23 @@ export function StoryDetailPanel({
                 {isExpanded ? (
                   <>
                     {group.canonicalURL ? (
-                      <a
-                        className={`member-expanded-url ${discordMessagePattern.test(group.canonicalURL) ? "member-expanded-url-discord" : ""}`.trim()}
-                        href={group.canonicalURL}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={group.canonicalURL}
-                      >
-                        {discordMessagePattern.test(group.canonicalURL) ? (
-                          <DiscordLinkIcon />
-                        ) : null}
-                        {labelForURL(group.canonicalURL)}
-                      </a>
+                      discordMessagePattern.test(group.canonicalURL) ? (
+                        <DiscordMessageLink
+                          url={group.canonicalURL}
+                          label={labelForURL(group.canonicalURL)}
+                          className="member-expanded-url member-expanded-url-discord"
+                        />
+                      ) : (
+                        <a
+                          className="member-expanded-url"
+                          href={group.canonicalURL}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={group.canonicalURL}
+                        >
+                          {labelForURL(group.canonicalURL)}
+                        </a>
+                      )
                     ) : null}
                     <article className="detail-item-content member-expanded-content">
                       {isPreviewLoading && !hasOriginalContent ? (

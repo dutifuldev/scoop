@@ -269,8 +269,13 @@ Evidence:
     const link = await screen.findByRole("link", {
       name: "Ephemeral watches discussion in Discord",
     });
-    expect(link).toHaveAttribute("href", "https://discord.com/channels/1/2/3");
+    expect(link).toHaveAttribute("href", "discord://-/channels/1/2/3");
     expect(link.querySelector("img.discord-link-icon")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open Discord message in browser" })).toHaveAttribute(
+      "href",
+      "https://discord.com/channels/1/2/3",
+    );
+    expect(screen.getByRole("button", { name: "Copy Discord message link" })).toBeInTheDocument();
     expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
   });
 

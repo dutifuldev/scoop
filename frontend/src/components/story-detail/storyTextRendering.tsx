@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Copy, ExternalLink } from "lucide-react";
 
 import discordLogoURL from "../../assets/discord.svg";
 
@@ -32,6 +33,75 @@ function normalizeURLTarget(rawURL: string): { url: string; trailing: string } |
 
 export function DiscordLinkIcon(): JSX.Element {
   return <img className="discord-link-icon" src={discordLogoURL} alt="" aria-hidden="true" />;
+}
+
+function discordAppURL(url: string): string {
+  const match = url.match(discordMessagePattern);
+  if (!match) {
+    return url;
+  }
+
+  return `discord://-/channels/${match[1]}/${match[2]}/${match[3]}`;
+}
+
+interface DiscordMessageLinkProps {
+  url: string;
+  label?: string;
+  className?: string;
+}
+
+export function DiscordMessageLink({
+  url,
+  label,
+  className = "",
+}: DiscordMessageLinkProps): JSX.Element {
+  const visibleLabel = label || labelForURL(url);
+
+  async function copyBrowserLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard writes can fail outside secure contexts; the browser option still exposes the URL.
+    }
+  }
+
+  return (
+    <span className="discord-link-wrap">
+      <a
+        className={`${className || "inline-discord-link"} discord-app-link`.trim()}
+        href={discordAppURL(url)}
+        title={url}
+      >
+        <DiscordLinkIcon />
+        {visibleLabel}
+      </a>
+      <span className="discord-link-actions" aria-label="Discord link actions">
+        <a
+          className="discord-link-action"
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open in browser"
+          aria-label="Open Discord message in browser"
+        >
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+          Browser
+        </a>
+        <button
+          type="button"
+          className="discord-link-action"
+          onClick={() => {
+            void copyBrowserLink();
+          }}
+          title="Copy link"
+          aria-label="Copy Discord message link"
+        >
+          <Copy className="h-3 w-3" aria-hidden="true" />
+          Copy
+        </button>
+      </span>
+    </span>
+  );
 }
 
 export function labelForURL(url: string): string {
@@ -71,17 +141,24 @@ function renderInlineLinks(text: string): ReactNode[] {
 
     const isDiscordMessage = discordMessagePattern.test(url);
     nodes.push(
-      <a
-        key={`${url}-${start}`}
-        className={isDiscordMessage ? "inline-discord-link" : "inline-rich-link"}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        title={url}
-      >
-        {isDiscordMessage ? <DiscordLinkIcon /> : null}
-        {markdownLabel || labelForURL(url)}
-      </a>,
+      isDiscordMessage ? (
+        <DiscordMessageLink
+          key={`${url}-${start}`}
+          url={url}
+          label={markdownLabel || labelForURL(url)}
+        />
+      ) : (
+        <a
+          key={`${url}-${start}`}
+          className="inline-rich-link"
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          title={url}
+        >
+          {markdownLabel || labelForURL(url)}
+        </a>
+      ),
     );
     if (!markdownURL && trailing) {
       nodes.push(trailing);

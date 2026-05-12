@@ -612,6 +612,34 @@
     @apply border border-brand-500/30 bg-brand-500/10 no-underline;
   }
 
+  .discord-link-wrap {
+    @apply relative inline-flex max-w-full align-baseline;
+  }
+
+  .discord-app-link {
+    @apply cursor-pointer;
+  }
+
+  .discord-link-actions {
+    @apply absolute left-0 top-full z-40 inline-flex items-center gap-1 rounded-[8px] border border-panel-500 bg-panel-800 p-1 opacity-0 shadow-panel transition-opacity duration-150;
+    pointer-events: none;
+  }
+
+  .discord-link-wrap:hover .discord-link-actions {
+    @apply opacity-100;
+    pointer-events: auto;
+    transition-delay: 650ms;
+  }
+
+  .discord-link-wrap:focus-within .discord-link-actions {
+    @apply opacity-100;
+    pointer-events: auto;
+  }
+
+  .discord-link-action {
+    @apply inline-flex items-center gap-1 rounded-[6px] border-0 bg-transparent px-1.5 py-1 text-[0.68rem] font-semibold text-panel-100 no-underline transition hover:bg-panel-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
+  }
+
   .discord-link-icon {
     @apply h-3.5 w-3.5 shrink-0;
   }

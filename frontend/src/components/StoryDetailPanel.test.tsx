@@ -151,6 +151,58 @@ function makeDetailWithSharedURL(): StoryDetailResponse {
   };
 }
 
+function makeSingleArticleDetail(): StoryDetailResponse {
+  return {
+    story: {
+      story_id: 3,
+      story_uuid: "story-uuid-single",
+      collection: "openclaw",
+      translation_mode: "disabled",
+      title: "Solo Story",
+      original_title: "Solo Story",
+      translated_title: null,
+      detected_language: "en",
+      canonical_url: "https://solo.example.com/item",
+      status: "active",
+      first_seen_at: "2026-02-14T09:00:00Z",
+      last_seen_at: "2026-02-14T09:00:00Z",
+      source_count: 1,
+      article_count: 1,
+    },
+    members: [
+      {
+        story_article_uuid: "single-member-1",
+        article_uuid: "single-doc-1",
+        source: "source-a",
+        source_item_id: "single-1",
+        collection: "openclaw",
+        canonical_url: "https://solo.example.com/item",
+        published_at: "2026-02-14T09:00:00Z",
+        normalized_title: "Solo Story",
+        normalized_text: "Solo expanded content body.",
+        detected_language: "en",
+        original_title: "Solo Story",
+        translated_title: null,
+        original_text: "Solo expanded content body.",
+        translated_text: null,
+        matched_at: "2026-02-14T09:00:00Z",
+        match_type: "seed",
+        dedup_decision: "NEW_STORY",
+        tags: [
+          {
+            tag_id: 10,
+            tag_uuid: "tag-uuid-i0",
+            tag: "i0",
+            color: "#f4212e",
+            created_at: "2026-02-14T09:00:00Z",
+            updated_at: "2026-02-14T09:00:00Z",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("StoryDetailPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -188,6 +240,116 @@ describe("StoryDetailPanel", () => {
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-2", 4000);
     });
+  });
+
+  it("renders single-article stories without duplicate title or article boxes", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={makeSingleArticleDetail()}
+          availableTags={[
+            {
+              tag_id: 11,
+              tag_uuid: "tag-uuid-needs-review",
+              tag: "needs-review",
+              color: "#71767b",
+              created_at: "2026-02-14T09:00:00Z",
+              updated_at: "2026-02-14T09:00:00Z",
+            },
+          ]}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Fetched preview for single-member-1.");
+
+    expect(screen.getAllByText("Solo Story")).toHaveLength(1);
+    expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/published .*source-a/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "solo.example.com" })).toBeInTheDocument();
+    expect(container.querySelector(".detail-title-row .member-tag-tools-title")).not.toBeNull();
+    expect(screen.getByText("i0")).toBeInTheDocument();
+    expect(container.querySelector(".member-card-single")).not.toBeNull();
+    expect(container.querySelector(".detail-item-content-single")).not.toBeNull();
+    expect(container.querySelector(".detail-text-block-single")).not.toBeNull();
+    expect(container.querySelector(".member-toggle")).toBeNull();
+    expect(container.querySelector(".member-expanded-url")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Add article tag" }));
+
+    expect(
+      container.querySelector(".detail-title-row .member-tag-input-shell-title"),
+    ).not.toBeNull();
+    expect(screen.getByLabelText("Article tag search")).toBeInTheDocument();
+  });
+
+  it("renders merged-story member titles with inline source links", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeDetail();
+    detail.members[0].tags = [
+      {
+        tag_id: 12,
+        tag_uuid: "tag-uuid-i0-merged",
+        tag: "i0",
+        color: "#f4212e",
+        created_at: "2026-02-14T09:00:00Z",
+        updated_at: "2026-02-14T09:00:00Z",
+      },
+    ];
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-1"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[
+            {
+              tag_id: 13,
+              tag_uuid: "tag-uuid-needs-review-merged",
+              tag: "needs-review",
+              color: "#71767b",
+              created_at: "2026-02-14T09:00:00Z",
+              updated_at: "2026-02-14T09:00:00Z",
+            },
+          ]}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Fetched preview for member-1.");
+
+    expect(screen.getByText("First item")).toBeInTheDocument();
+    expect(screen.getByText("Second item")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "a.example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "b.example.com" })).toBeInTheDocument();
+    expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
+    expect(screen.getByText("i0")).toBeInTheDocument();
+    expect(container.querySelector(".member-card-single")).toBeNull();
+    expect(container.querySelector(".member-expanded-url")).toBeNull();
   });
 
   it("renders same-url members as separate visible items", async () => {

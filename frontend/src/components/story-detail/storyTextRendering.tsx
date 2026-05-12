@@ -78,12 +78,14 @@ interface DiscordMessageLinkProps {
   url: string;
   label?: string;
   className?: string;
+  compact?: boolean;
 }
 
 export function DiscordMessageLink({
   url,
   label,
   className = "",
+  compact = false,
 }: DiscordMessageLinkProps): JSX.Element {
   const visibleLabel = label || labelForURL(url);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -100,9 +102,10 @@ export function DiscordMessageLink({
         className={`${className || "inline-discord-link"} discord-app-link`.trim()}
         href={discordAppURL(url)}
         title={url}
+        aria-label={compact ? visibleLabel : undefined}
       >
         <DiscordLinkIcon />
-        {visibleLabel}
+        {compact ? <span className="sr-only">{visibleLabel}</span> : visibleLabel}
       </a>
       <span className="discord-link-actions" aria-label="Discord link actions">
         <a
@@ -130,6 +133,43 @@ export function DiscordMessageLink({
         </button>
       </span>
     </span>
+  );
+}
+
+interface TitleSourceLinkProps {
+  url: string;
+}
+
+export function TitleSourceLink({ url }: TitleSourceLinkProps): JSX.Element | null {
+  const trimmedURL = url.trim();
+  if (!trimmedURL) {
+    return null;
+  }
+
+  const label = labelForURL(trimmedURL);
+  if (discordMessagePattern.test(trimmedURL)) {
+    return (
+      <DiscordMessageLink
+        url={trimmedURL}
+        label={label}
+        className="title-source-link title-source-link-discord"
+        compact
+      />
+    );
+  }
+
+  return (
+    <a
+      className="title-source-link"
+      href={trimmedURL}
+      target="_blank"
+      rel="noreferrer"
+      title={trimmedURL}
+      aria-label={label}
+    >
+      <ExternalLink className="title-source-link-icon" aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </a>
   );
 }
 

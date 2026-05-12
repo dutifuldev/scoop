@@ -127,7 +127,7 @@
   }
 
   .chip.active {
-    @apply border-brand-500 bg-brand-500/20 text-panel-100;
+    @apply border-panel-400 bg-panel-700 text-panel-100;
   }
 
   .chip:disabled {
@@ -147,7 +147,7 @@
   }
 
   .day-nav-btn:hover {
-    @apply border-brand-500/60;
+    @apply border-panel-400 bg-panel-700/70;
   }
 
   .day-nav-icon {
@@ -164,7 +164,7 @@
   }
 
   .day-current-btn:hover {
-    @apply border-brand-500/60;
+    @apply border-panel-400 bg-panel-700/70;
   }
 
   .day-current-btn:focus {
@@ -209,7 +209,7 @@
   .layout-resize-handle:hover,
   .layout-resize-handle:focus,
   .layout-resize-handle[data-resize-handle-active] {
-    @apply bg-brand-500 outline-none;
+    @apply bg-panel-400 outline-none;
   }
 
   .panel {
@@ -261,7 +261,7 @@
   }
 
   .reader-story-section.is-active {
-    @apply bg-brand-500/[0.03];
+    @apply bg-panel-700/35;
   }
 
   .reader-story-header {
@@ -292,7 +292,7 @@
   }
 
   .story-card.active {
-    @apply border-brand-500/80 ring-1 ring-brand-500/60;
+    @apply border-panel-400/80 ring-1 ring-panel-400/45;
   }
 
   .story-title-row {
@@ -333,11 +333,21 @@
   }
 
   .detail-title-row {
-    @apply flex items-start gap-2.5;
+    @apply flex min-w-0 items-start gap-2.5;
   }
 
   .detail-title {
-    @apply m-0 font-news text-[1.08rem] leading-[1.3] text-panel-100;
+    @apply m-0 min-w-0 font-news text-[1.08rem] leading-[1.3] text-panel-100;
+  }
+
+  .title-source-link {
+    @apply ml-1.5 inline-flex h-[1.15em] w-[1.15em] shrink-0 items-center justify-center rounded-full text-panel-400 no-underline align-[-0.12em] transition hover:bg-panel-700 hover:text-panel-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
+    line-height: inherit;
+  }
+
+  .title-source-link-icon,
+  .title-source-link .discord-link-icon {
+    @apply h-[0.72em] w-[0.72em];
   }
 
   .detail-title-original {
@@ -393,7 +403,7 @@
   }
 
   .detail-text-mode-btn.active {
-    @apply border-brand-500/60 bg-brand-500/15 text-panel-100;
+    @apply border-panel-400/80 bg-panel-700 text-panel-100;
   }
 
   .translation-progress {
@@ -410,9 +420,9 @@
     width: 34%;
     background: linear-gradient(
       90deg,
-      rgba(248, 165, 80, 0.15),
-      rgba(248, 165, 80, 0.95),
-      rgba(248, 165, 80, 0.15)
+      rgba(29, 155, 240, 0.15),
+      rgba(29, 155, 240, 0.95),
+      rgba(29, 155, 240, 0.15)
     );
     animation: translation-progress-sweep 1.35s ease-in-out infinite;
   }
@@ -430,11 +440,24 @@
   }
 
   .member-card-expanded {
-    @apply bg-brand-500/5;
+    @apply bg-panel-700/35;
+  }
+
+  .member-card-single,
+  .member-card-single.member-card-expanded {
+    @apply border-0 bg-transparent p-0;
   }
 
   .member-toggle {
     @apply inline-flex max-w-full items-start gap-1.5 border-0 bg-transparent p-0 text-left;
+  }
+
+  .member-title-row {
+    @apply flex min-w-0 items-start gap-1.5;
+  }
+
+  .member-title-row .member-toggle {
+    @apply min-w-0;
   }
 
   .member-toggle-icon {
@@ -471,12 +494,24 @@
     @apply mb-0 mt-1.5 font-mono text-[0.74rem] text-panel-400;
   }
 
+  .member-sub-single {
+    @apply mt-2;
+  }
+
   .member-tag-tools {
     @apply mt-2;
   }
 
+  .member-tag-tools-title {
+    @apply ml-auto mt-0 flex min-w-fit max-w-full flex-col items-end gap-1;
+  }
+
   .member-tag-row {
     @apply flex min-h-7 flex-wrap items-center gap-1.5;
+  }
+
+  .member-tag-row-title {
+    @apply min-h-[1.35rem] justify-end;
   }
 
   .member-tag-row-compact {
@@ -489,6 +524,10 @@
 
   .member-tag-input-shell {
     @apply flex min-h-8 w-full max-w-[520px] flex-wrap items-center gap-1.5 rounded-[10px] border border-panel-500 bg-panel-700/50 px-2 py-1.5 transition-colors duration-150;
+  }
+
+  .member-tag-input-shell-title {
+    @apply w-[min(280px,70vw)] flex-nowrap justify-end;
   }
 
   .member-tag-input-shell.is-active {
@@ -512,7 +551,7 @@
   }
 
   .member-tag-suggestion {
-    --tag-color: #f8a550;
+    --tag-color: #71767b;
     @apply flex min-h-7 w-full items-center rounded-[7px] border px-2 text-left font-mono text-[0.72rem] font-semibold transition-colors duration-150;
     border-color: color-mix(in srgb, var(--tag-color) 32%, transparent);
     background: color-mix(in srgb, var(--tag-color) 10%, transparent);
@@ -526,7 +565,7 @@
   }
 
   .tag-chip {
-    --tag-color: #f8a550;
+    --tag-color: #71767b;
     @apply inline-flex min-h-5 items-center gap-0.5 rounded-full border px-1 py-[1px] font-mono text-[0.66rem] font-semibold leading-none;
     border-color: color-mix(in srgb, var(--tag-color) 45%, transparent);
     background: color-mix(in srgb, var(--tag-color) 14%, transparent);
@@ -553,6 +592,10 @@
     @apply mt-2 rounded-[10px] border border-panel-500 bg-panel-700/50 p-3;
   }
 
+  .detail-item-content-single {
+    @apply mb-0 rounded-none border-0 bg-transparent p-0;
+  }
+
   .detail-item-content-body {
     @apply grid gap-4;
   }
@@ -565,12 +608,18 @@
     @apply grid gap-3 rounded-[8px] border border-panel-500/60 px-5 py-4;
   }
 
+  .detail-text-block-single,
+  .detail-text-block-single.detail-text-block-original,
+  .detail-text-block-single.detail-text-block-translated {
+    @apply rounded-none border-0 bg-transparent px-0 py-0;
+  }
+
   .detail-text-block-original {
     @apply bg-panel-700/40;
   }
 
   .detail-text-block-translated {
-    @apply border-brand-500/40 bg-brand-500/10;
+    @apply border-panel-400/45 bg-panel-700/35;
   }
 
   .detail-text-label {
@@ -626,11 +675,11 @@
 
   .inline-rich-link:hover,
   .inline-discord-link:hover {
-    @apply bg-brand-500/15 text-panel-100 decoration-brand-400;
+    @apply bg-panel-700 text-panel-100 decoration-brand-400;
   }
 
   .inline-discord-link {
-    @apply border border-brand-500/30 bg-brand-500/10 no-underline;
+    @apply border border-panel-500 bg-panel-700/45 no-underline;
   }
 
   .discord-link-wrap {
@@ -665,14 +714,6 @@
     @apply h-3.5 w-3.5 shrink-0;
   }
 
-  .member-expanded-url {
-    @apply mt-2 inline-flex max-w-full items-center gap-1.5 rounded-[8px] border border-brand-500/30 bg-brand-500/10 px-2.5 py-1.5 text-[0.86rem] font-semibold leading-tight text-brand-400 no-underline transition;
-  }
-
-  .member-expanded-url:hover {
-    @apply bg-brand-500/15 text-panel-100;
-  }
-
   .member-expanded-content {
     @apply mt-2 rounded-none border-0 bg-transparent p-0;
   }
@@ -694,7 +735,7 @@
   }
 
   .member-merge-provenance-row.is-selected {
-    @apply bg-brand-500/15;
+    @apply bg-panel-700;
   }
 
   .member-merge-provenance-link {
@@ -790,7 +831,7 @@
   }
 
   .app-root-viewer .chip.active {
-    @apply border-brand-500 bg-brand-500/30 text-panel-100;
+    @apply border-panel-400 bg-panel-700 text-panel-100;
   }
 
   .app-root-viewer .stories-list {
@@ -822,11 +863,11 @@
   }
 
   .app-root-viewer .story-card:hover {
-    @apply bg-brand-500/15;
+    @apply bg-panel-700/70;
   }
 
   .app-root-viewer .story-card.active {
-    @apply border-transparent bg-brand-500/20 shadow-none ring-0;
+    @apply border-transparent bg-panel-700 shadow-none ring-0;
   }
 
   .app-root-viewer .story-meta,
@@ -844,7 +885,12 @@
   }
 
   .app-root-viewer .member-card.member-card-expanded {
-    @apply bg-brand-500/5;
+    @apply bg-panel-700/30;
+  }
+
+  .app-root-viewer .member-card.member-card-single,
+  .app-root-viewer .member-card.member-card-single.member-card-expanded {
+    @apply bg-transparent px-5 py-0;
   }
 
   .app-root-viewer .member-card > * {
@@ -870,12 +916,12 @@
     @apply mx-5 mb-4 mt-2 rounded-[12px] border border-panel-500 bg-panel-800/80 p-4;
   }
 
-  .app-root-viewer .detail-item-content-text {
-    @apply text-[0.94rem] leading-[1.6];
+  .app-root-viewer .detail-item-content.detail-item-content-single {
+    @apply mx-0 mb-0 rounded-none border-0 bg-transparent p-0;
   }
 
-  .app-root-viewer .member-expanded-url {
-    @apply px-2.5 py-1.5;
+  .app-root-viewer .detail-item-content-text {
+    @apply text-[0.94rem] leading-[1.6];
   }
 
   .app-root-viewer .member-expanded-content {

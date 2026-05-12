@@ -6,6 +6,7 @@ import type {
   CollectionSummary,
   JSendResponse,
   LanguageOption,
+  PersonIdentity,
   StatsResponse,
   StoryDayBucket,
   StoryDetailResponse,
@@ -118,6 +119,15 @@ export async function getTags(includeArchived = false): Promise<{ items: Tag[] }
   return fetchJSend<{ items: Tag[] }>(`/api/v1/tags${suffix}`);
 }
 
+export async function getPersonIdentities(query = ""): Promise<{ items: PersonIdentity[] }> {
+  const params = new URLSearchParams();
+  if (query.trim()) {
+    params.set("q", query.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJSend<{ items: PersonIdentity[] }>(`/api/v1/person-identities${suffix}`);
+}
+
 export async function updateCollectionSettings(
   collection: string,
   translationMode: "enabled" | "disabled",
@@ -181,6 +191,31 @@ export async function addArticleTag(articleUUID: string, tagSlug: string): Promi
 export async function removeArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
   await fetchJSend(
     `/api/v1/articles/${encodeURIComponent(articleUUID)}/tags/${encodeURIComponent(tagSlug)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function addArticlePersonIdentity(
+  articleUUID: string,
+  identityRef: string,
+): Promise<{ person_identity: PersonIdentity }> {
+  return fetchJSend<{ person_identity: PersonIdentity }>(
+    `/api/v1/articles/${encodeURIComponent(articleUUID)}/person-identities`,
+    {
+      method: "POST",
+      bodyJson: { identity_ref: identityRef },
+    },
+  );
+}
+
+export async function removeArticlePersonIdentity(
+  articleUUID: string,
+  identityRefOrUUID: string,
+): Promise<void> {
+  await fetchJSend(
+    `/api/v1/articles/${encodeURIComponent(articleUUID)}/person-identities/${encodeURIComponent(identityRefOrUUID)}`,
     {
       method: "DELETE",
     },

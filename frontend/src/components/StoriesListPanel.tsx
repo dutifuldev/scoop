@@ -8,6 +8,10 @@ import { Button } from "./ui/button";
 import { DayPickerPopover } from "./ui/day-picker-popover";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  personIdentityLabel,
+  personIdentityTitle,
+} from "./story-detail/ArticlePersonIdentityEditor";
 
 interface StoriesListPanelProps {
   searchInput: string;
@@ -320,6 +324,20 @@ export function StoriesListPanel({
                             }
                           >
                             {tag.tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {story.person_identities && story.person_identities.length > 0 ? (
+                      <div className="story-person-row" aria-label="Story person identities">
+                        {story.person_identities.map((identity) => (
+                          <span
+                            key={identity.person_identity_uuid}
+                            className="person-chip person-chip-small"
+                            title={personIdentityTitle(identity)}
+                          >
+                            <span className="person-chip-provider">{identity.provider}</span>
+                            <span>{personIdentityLabel(identity)}</span>
                           </span>
                         ))}
                       </div>

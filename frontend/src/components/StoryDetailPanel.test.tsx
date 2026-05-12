@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  addArticlePersonIdentity,
   addArticleTag,
   getStoryArticlePreview,
+  removeArticlePersonIdentity,
   removeArticleTag,
   requestTranslation,
 } from "../api";
@@ -13,6 +15,7 @@ import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { StoryDetailResponse } from "../types";
 
 vi.mock("../api", () => ({
+  addArticlePersonIdentity: vi.fn(async () => undefined),
   addArticleTag: vi.fn(async () => undefined),
   getStoryArticlePreview: vi.fn(async (storyMemberUUID: string, _maxChars = 4000) => ({
     story_article_uuid: storyMemberUUID,
@@ -21,6 +24,7 @@ vi.mock("../api", () => ({
     char_count: 64,
     truncated: false,
   })),
+  removeArticlePersonIdentity: vi.fn(async () => undefined),
   removeArticleTag: vi.fn(async () => undefined),
   requestTranslation: vi.fn(async () => ({
     stats: { total: 1, translated: 1, cached: 0, skipped: 0 },
@@ -198,6 +202,18 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             updated_at: "2026-02-14T09:00:00Z",
           },
         ],
+        person_identities: [
+          {
+            person_identity_id: 1,
+            person_identity_uuid: "person-identity-uuid-1",
+            provider: "discord",
+            provider_user_id: "123456789012345678",
+            handle: "alice",
+            identity_ref: "id://discord/id/123456789012345678?handle=alice",
+            created_at: "2026-02-14T09:00:00Z",
+            updated_at: "2026-02-14T09:00:00Z",
+          },
+        ],
       },
     ],
   };
@@ -282,7 +298,12 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByText(/published .*source-a/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "solo.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".detail-title-row .member-tag-tools-title")).not.toBeNull();
+    expect(screen.getByText("@alice").closest(".person-chip")).not.toBeNull();
+    expect(screen.getByText("discord")).toHaveClass("person-chip-provider");
     expect(screen.getByText("i0")).toHaveClass("title-tag");
+    expect(screen.getByRole("button", { name: "Add article person identity" })).toHaveClass(
+      "title-action",
+    );
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
     expect(container.querySelector(".member-card-single")).not.toBeNull();
     expect(container.querySelector(".detail-item-content-single")).not.toBeNull();
@@ -313,6 +334,24 @@ describe("StoryDetailPanel", () => {
       container.querySelector(".detail-title-row .member-tag-input-shell-title"),
     ).not.toBeNull();
     expect(screen.getByLabelText("Article tag search")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add article person identity" }));
+    await user.type(screen.getByLabelText("Person identity ref"), "id://github/handle/octocat");
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(addArticlePersonIdentity).toHaveBeenCalledWith(
+        "single-doc-1",
+        "id://github/handle/octocat",
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove discord:@alice" }));
+    await waitFor(() =>
+      expect(removeArticlePersonIdentity).toHaveBeenCalledWith(
+        "single-doc-1",
+        "person-identity-uuid-1",
+      ),
+    );
   });
 
   it("renders merged-story member titles with inline source links", async () => {

@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { addArticleTag, removeArticleTag, requestTranslation } from "../api";
+import {
+  addArticlePersonIdentity,
+  addArticleTag,
+  removeArticlePersonIdentity,
+  removeArticleTag,
+  requestTranslation,
+} from "../api";
 import { useStoryArticlePreviews } from "../hooks/useStoryArticlePreviews";
 import {
   defaultCollectionTranslationMode,
@@ -9,6 +15,7 @@ import {
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, Tag } from "../types";
 import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
+import { ArticlePersonIdentityEditor } from "./story-detail/ArticlePersonIdentityEditor";
 import {
   buildMemberGroups,
   StoryArticleGroup,
@@ -49,6 +56,8 @@ export function StoryDetailPanel({
   const [translationError, setTranslationError] = useState("");
   const [tagMutationKey, setTagMutationKey] = useState("");
   const [tagMutationError, setTagMutationError] = useState("");
+  const [personMutationKey, setPersonMutationKey] = useState("");
+  const [personMutationError, setPersonMutationError] = useState("");
   const translationRequestedRef = useRef<string>("");
   const activeTranslationKeyRef = useRef<string>("");
   const previousStoryUUIDRef = useRef<string>("");
@@ -243,6 +252,49 @@ export function StoryDetailPanel({
     }
   }
 
+  async function onAddArticlePersonIdentity(
+    articleUUID: string,
+    identityRef: string,
+  ): Promise<void> {
+    if (!articleUUID || !identityRef.trim()) {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${identityRef}:add`;
+    setPersonMutationKey(mutationKey);
+    setPersonMutationError("");
+    try {
+      await addArticlePersonIdentity(articleUUID, identityRef.trim());
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setPersonMutationError(err instanceof Error ? err.message : "Failed to add person.");
+      throw err;
+    } finally {
+      setPersonMutationKey("");
+    }
+  }
+
+  async function onRemoveArticlePersonIdentity(
+    articleUUID: string,
+    identityRefOrUUID: string,
+  ): Promise<void> {
+    if (!articleUUID || !identityRefOrUUID.trim()) {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${identityRefOrUUID}:remove`;
+    setPersonMutationKey(mutationKey);
+    setPersonMutationError("");
+    try {
+      await removeArticlePersonIdentity(articleUUID, identityRefOrUUID.trim());
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setPersonMutationError(err instanceof Error ? err.message : "Failed to remove person.");
+    } finally {
+      setPersonMutationKey("");
+    }
+  }
+
   function renderStoryHeader(): JSX.Element {
     if (!detail) {
       return <></>;
@@ -273,6 +325,16 @@ export function StoryDetailPanel({
               />
             </h2>
             {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
+            {singleRepresentative ? (
+              <ArticlePersonIdentityEditor
+                articleUUID={singleRepresentative.article_uuid}
+                identities={singleRepresentative.person_identities ?? []}
+                mutationKey={personMutationKey}
+                variant="title"
+                onAddIdentity={onAddArticlePersonIdentity}
+                onRemoveIdentity={onRemoveArticlePersonIdentity}
+              />
+            ) : null}
             {singleRepresentative ? (
               <ArticleTagEditor
                 articleUUID={singleRepresentative.article_uuid}
@@ -352,6 +414,7 @@ export function StoryDetailPanel({
               activeLang={activeLang}
               availableTags={availableTags}
               tagMutationKey={tagMutationKey}
+              personMutationKey={personMutationKey}
               itemPreviewByUUID={itemPreviewByUUID}
               itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
               itemPreviewErrorByUUID={itemPreviewErrorByUUID}
@@ -361,6 +424,8 @@ export function StoryDetailPanel({
               onClearSelectedItem={onClearSelectedItem}
               onAddArticleTag={onAddArticleTag}
               onRemoveArticleTag={onRemoveArticleTag}
+              onAddArticlePersonIdentity={onAddArticlePersonIdentity}
+              onRemoveArticlePersonIdentity={onRemoveArticlePersonIdentity}
             />
           ))}
         </section>
@@ -377,6 +442,7 @@ export function StoryDetailPanel({
         {selectedStoryUUID && isLoading ? <p className="muted">Fetching story detail...</p> : null}
         {selectedStoryUUID && !isLoading && error ? <p className="muted">{error}</p> : null}
         {tagMutationError ? <p className="banner-error">{tagMutationError}</p> : null}
+        {personMutationError ? <p className="banner-error">{personMutationError}</p> : null}
         {selectedStoryUUID && !isLoading && !error && detail ? renderStoryView() : null}
       </div>
     </aside>

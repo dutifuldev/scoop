@@ -517,7 +517,7 @@
   }
 
   .tag-chip-removable {
-    @apply pl-1.5;
+    @apply pl-2;
   }
 
   .tag-chip-remove {

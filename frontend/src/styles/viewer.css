@@ -593,7 +593,7 @@
   }
 
   .detail-item-content-single {
-    @apply mb-0 rounded-none border-0 bg-transparent p-0;
+    @apply mb-0 rounded-none border-0 bg-transparent px-0 pb-4 pt-0;
   }
 
   .detail-item-content-body {
@@ -716,6 +716,10 @@
 
   .member-expanded-content {
     @apply mt-2 rounded-none border-0 bg-transparent p-0;
+  }
+
+  .member-expanded-content.detail-item-content-single {
+    @apply pb-4;
   }
 
   .member-merge-provenance {
@@ -917,7 +921,7 @@
   }
 
   .app-root-viewer .detail-item-content.detail-item-content-single {
-    @apply mx-0 mb-0 rounded-none border-0 bg-transparent p-0;
+    @apply mx-0 mb-0 rounded-none border-0 bg-transparent px-0 pb-8 pt-0;
   }
 
   .app-root-viewer .detail-item-content-text {
@@ -926,6 +930,10 @@
 
   .app-root-viewer .member-expanded-content {
     @apply mx-0 mb-0 mt-2 rounded-none border-0 bg-transparent p-0;
+  }
+
+  .app-root-viewer .member-expanded-content.detail-item-content-single {
+    @apply pb-8;
   }
 
   .app-root-viewer .member-merge-provenance {

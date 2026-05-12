@@ -143,50 +143,52 @@ export function StoryArticleGroup({
       {isMergedStory ? (
         <>
           <div className="member-title-row">
-            <button
-              type="button"
-              className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
-              onClick={() => {
-                if (isExpanded) {
-                  onExpandedGroupKeysChange((previous) =>
-                    previous.filter((existingGroupKey) => existingGroupKey !== group.key),
-                  );
-                  if (hasSelectedMember) {
-                    onClearSelectedItem();
+            <div className="member-title-cluster">
+              <button
+                type="button"
+                className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
+                onClick={() => {
+                  if (isExpanded) {
+                    onExpandedGroupKeysChange((previous) =>
+                      previous.filter((existingGroupKey) => existingGroupKey !== group.key),
+                    );
+                    if (hasSelectedMember) {
+                      onClearSelectedItem();
+                    }
+                    return;
                   }
-                  return;
-                }
 
-                onExpandedGroupKeysChange((previous) => {
-                  if (previous.includes(group.key)) {
-                    return previous;
-                  }
-                  return [...previous, group.key];
-                });
-                onSelectItem(routeItemUUID);
-              }}
-              aria-expanded={isExpanded}
-              aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${representativeDisplayTitle || "(no title)"}`}
-            >
-              <p className="member-head">{representativeDisplayTitle || "(no title)"}</p>
-              {isExpanded ? (
-                <ChevronDown className="member-toggle-icon" aria-hidden="true" />
-              ) : (
-                <ChevronRight className="member-toggle-icon" aria-hidden="true" />
-              )}
-            </button>
-            {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
-            {showPrimaryTagEditor ? (
-              <ArticleTagEditor
-                articleUUID={representative.article_uuid}
-                currentTags={representative.tags ?? []}
-                availableTags={availableTags}
-                mutationKey={tagMutationKey}
-                variant="title"
-                onAddTag={onAddArticleTag}
-                onRemoveTag={onRemoveArticleTag}
-              />
-            ) : null}
+                  onExpandedGroupKeysChange((previous) => {
+                    if (previous.includes(group.key)) {
+                      return previous;
+                    }
+                    return [...previous, group.key];
+                  });
+                  onSelectItem(routeItemUUID);
+                }}
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${representativeDisplayTitle || "(no title)"}`}
+              >
+                <p className="member-head">{representativeDisplayTitle || "(no title)"}</p>
+                {isExpanded ? (
+                  <ChevronDown className="member-toggle-icon" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="member-toggle-icon" aria-hidden="true" />
+                )}
+              </button>
+              {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
+              {showPrimaryTagEditor ? (
+                <ArticleTagEditor
+                  articleUUID={representative.article_uuid}
+                  currentTags={representative.tags ?? []}
+                  availableTags={availableTags}
+                  mutationKey={tagMutationKey}
+                  variant="title"
+                  onAddTag={onAddArticleTag}
+                  onRemoveTag={onRemoveArticleTag}
+                />
+              ) : null}
+            </div>
           </div>
           <p className="member-sub">
             matched {formatDateTime(representative.matched_at)} • published{" "}

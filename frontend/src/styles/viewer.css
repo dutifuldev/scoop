@@ -333,7 +333,11 @@
   }
 
   .detail-title-row {
-    @apply flex min-w-0 items-start gap-2.5;
+    @apply flex min-w-0 items-start;
+  }
+
+  .detail-title-cluster {
+    @apply flex min-w-0 max-w-full flex-wrap items-start gap-x-1.5 gap-y-1;
   }
 
   .detail-title {
@@ -341,7 +345,7 @@
   }
 
   .title-source-link {
-    @apply ml-1.5 inline-flex h-[1.15em] w-[1.15em] shrink-0 items-center justify-center rounded-full text-panel-400 no-underline align-[-0.12em] transition hover:bg-panel-700 hover:text-panel-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
+    @apply inline-flex h-[1.15em] w-[1.15em] shrink-0 items-center justify-center rounded-full text-panel-400 no-underline transition hover:bg-panel-700 hover:text-panel-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
     line-height: inherit;
   }
 
@@ -453,7 +457,11 @@
   }
 
   .member-title-row {
-    @apply flex min-w-0 items-start gap-1.5;
+    @apply flex min-w-0 items-start;
+  }
+
+  .member-title-cluster {
+    @apply flex min-w-0 max-w-full flex-wrap items-start gap-x-1.5 gap-y-1;
   }
 
   .member-title-row .member-toggle {
@@ -503,7 +511,7 @@
   }
 
   .member-tag-tools-title {
-    @apply ml-auto mt-0 flex min-w-fit max-w-full flex-col items-end gap-1;
+    @apply mt-0 flex min-w-fit max-w-full flex-col items-start gap-1;
   }
 
   .member-tag-row {
@@ -511,7 +519,7 @@
   }
 
   .member-tag-row-title {
-    @apply min-h-[1.35rem] justify-end;
+    @apply min-h-[1.35rem] justify-start;
   }
 
   .member-tag-row-compact {
@@ -527,7 +535,7 @@
   }
 
   .member-tag-input-shell-title {
-    @apply w-[min(280px,70vw)] flex-nowrap justify-end;
+    @apply w-[min(280px,70vw)] flex-nowrap justify-start;
   }
 
   .member-tag-input-shell.is-active {

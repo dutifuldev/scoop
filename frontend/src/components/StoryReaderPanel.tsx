@@ -853,21 +853,21 @@ function StoryReaderSection({
         <>
           <div className="reader-story-header">
             <div className="detail-title-row">
-              <h2 className="detail-title">
-                {displayTitle || "(untitled)"}
+              <div className="detail-title-cluster">
+                <h2 className="detail-title">{displayTitle || "(untitled)"}</h2>
                 {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
-              </h2>
-              {singleRepresentative ? (
-                <ArticleTagEditor
-                  articleUUID={singleRepresentative.article_uuid}
-                  currentTags={singleRepresentative.tags ?? []}
-                  availableTags={availableTags}
-                  mutationKey={tagMutationKey}
-                  variant="title"
-                  onAddTag={onAddArticleTag}
-                  onRemoveTag={onRemoveArticleTag}
-                />
-              ) : null}
+                {singleRepresentative ? (
+                  <ArticleTagEditor
+                    articleUUID={singleRepresentative.article_uuid}
+                    currentTags={singleRepresentative.tags ?? []}
+                    availableTags={availableTags}
+                    mutationKey={tagMutationKey}
+                    variant="title"
+                    onAddTag={onAddArticleTag}
+                    onRemoveTag={onRemoveArticleTag}
+                  />
+                ) : null}
+              </div>
             </div>
             {showTranslatedTitle ? (
               <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>

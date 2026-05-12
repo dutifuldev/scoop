@@ -4,10 +4,10 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
-        display: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
-        news: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
-        mono: ['"Helvetica Neue"', "Helvetica", "Arial", "sans-serif"],
+        sans: ['"Yodel Grotesk"', "Arial", "sans-serif"],
+        display: ['"Yodel Grotesk"', "Arial", "sans-serif"],
+        news: ['"Yodel Grotesk"', "Arial", "sans-serif"],
+        mono: ['"Yodel Grotesk"', "Arial", "sans-serif"],
       },
       colors: {
         panel: {

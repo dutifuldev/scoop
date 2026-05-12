@@ -469,6 +469,9 @@ export function StoryViewerPage(): JSX.Element {
     },
     [],
   );
+  const onReaderScrollTargetSettled = useCallback((storyUUID: string) => {
+    setReaderScrollTargetStoryUUID((previous) => (previous === storyUUID ? "" : previous));
+  }, []);
 
   const currentCollectionLabel = useCurrentCollectionLabel(collections, filters.collection);
 
@@ -577,11 +580,7 @@ export function StoryViewerPage(): JSX.Element {
               onSelectItem={goToItem}
               onClearSelectedItem={clearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}
-              onScrollTargetSettled={(storyUUID) => {
-                setReaderScrollTargetStoryUUID((previous) =>
-                  previous === storyUUID ? "" : previous,
-                );
-              }}
+              onScrollTargetSettled={onReaderScrollTargetSettled}
             />
           </Panel>
         </Group>

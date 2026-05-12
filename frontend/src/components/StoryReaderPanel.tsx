@@ -175,6 +175,7 @@ export function StoryReaderPanel({
   const restoreVisibleCountRef = useRef(0);
   const restoredStateKeyRef = useRef("");
   const handledScrollTargetRevisionRef = useRef(0);
+  const handledScrollIntoViewRevisionRef = useRef(0);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
 
@@ -501,11 +502,25 @@ export function StoryReaderPanel({
     if (!scrollTargetStoryUUID) {
       return;
     }
+    if (
+      scrollTargetRevision > 0 &&
+      handledScrollIntoViewRevisionRef.current === scrollTargetRevision
+    ) {
+      return;
+    }
 
     const targetIndex = storyUUIDs.indexOf(scrollTargetStoryUUID);
     if (targetIndex >= 0) {
       setVisibleCount((previous) => Math.max(previous, targetIndex + 1));
     }
+
+    const cancelProgrammaticScroll = (): void => {
+      if (programmaticScrollTimerRef.current !== null) {
+        window.clearTimeout(programmaticScrollTimerRef.current);
+        programmaticScrollTimerRef.current = null;
+      }
+      onScrollTargetSettled?.(scrollTargetStoryUUID);
+    };
 
     const scrollToTarget = (): void => {
       const target = sectionRefs.current[scrollTargetStoryUUID];
@@ -513,6 +528,9 @@ export function StoryReaderPanel({
         return;
       }
 
+      if (scrollTargetRevision > 0) {
+        handledScrollIntoViewRevisionRef.current = scrollTargetRevision;
+      }
       target.scrollIntoView({ block: "start", inline: "nearest", behavior: "smooth" });
       setActiveStoryUUID(scrollTargetStoryUUID);
       if (programmaticScrollTimerRef.current !== null) {
@@ -526,12 +544,20 @@ export function StoryReaderPanel({
 
     const frame = window.requestAnimationFrame(scrollToTarget);
     const timeout = window.setTimeout(scrollToTarget, 80);
+    const root = contentRef.current;
+    root?.addEventListener("wheel", cancelProgrammaticScroll, { passive: true, once: true });
+    root?.addEventListener("touchstart", cancelProgrammaticScroll, { passive: true, once: true });
+    root?.addEventListener("pointerdown", cancelProgrammaticScroll, { passive: true, once: true });
     return () => {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timeout);
+      root?.removeEventListener("wheel", cancelProgrammaticScroll);
+      root?.removeEventListener("touchstart", cancelProgrammaticScroll);
+      root?.removeEventListener("pointerdown", cancelProgrammaticScroll);
     };
   }, [
     onScrollTargetSettled,
+    scrollTargetRevision,
     scrollTargetStoryUUID,
     setActiveStoryUUID,
     storyUUIDs,

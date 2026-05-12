@@ -506,14 +506,14 @@
 
   .tag-chip {
     --tag-color: #f8a550;
-    @apply inline-flex min-h-7 items-center gap-1.5 border px-2 py-1 font-mono text-[0.72rem] font-semibold leading-none;
+    @apply inline-flex min-h-6 items-center gap-1 border px-1.5 py-0.5 font-mono text-[0.68rem] font-semibold leading-none;
     border-color: color-mix(in srgb, var(--tag-color) 45%, transparent);
     background: color-mix(in srgb, var(--tag-color) 14%, transparent);
     color: color-mix(in srgb, var(--tag-color) 78%, white);
   }
 
   .tag-chip-small {
-    @apply min-h-5 px-1.5 py-0.5 text-[0.62rem];
+    @apply min-h-4 px-1 py-[1px] text-[0.6rem];
   }
 
   .tag-chip-remove {

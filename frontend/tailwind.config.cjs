@@ -7,7 +7,16 @@ module.exports = {
         sans: ['"Yodel Grotesk"', "Arial", "sans-serif"],
         display: ['"Yodel Grotesk"', "Arial", "sans-serif"],
         news: ['"Yodel Grotesk"', "Arial", "sans-serif"],
-        mono: ['"Yodel Grotesk"', "Arial", "sans-serif"],
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Monaco",
+          "Consolas",
+          '"Liberation Mono"',
+          '"Courier New"',
+          "monospace",
+        ],
       },
       colors: {
         panel: {

@@ -506,7 +506,7 @@
 
   .tag-chip {
     --tag-color: #f8a550;
-    @apply inline-flex min-h-5 items-center gap-1 rounded-full border px-1 py-[1px] font-mono text-[0.66rem] font-semibold leading-none;
+    @apply inline-flex min-h-5 items-center gap-0.5 rounded-full border px-1 py-[1px] font-mono text-[0.66rem] font-semibold leading-none;
     border-color: color-mix(in srgb, var(--tag-color) 45%, transparent);
     background: color-mix(in srgb, var(--tag-color) 14%, transparent);
     color: color-mix(in srgb, var(--tag-color) 78%, white);

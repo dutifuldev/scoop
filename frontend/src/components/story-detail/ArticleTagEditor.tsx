@@ -4,12 +4,14 @@ import { Plus, X } from "lucide-react";
 
 import type { Tag } from "../../types";
 import { Input } from "../ui/input";
+import { TitleActionButton, TitleTag, TitleTagInput } from "./TitleActions";
 
 interface ArticleTagEditorProps {
   articleUUID: string;
   currentTags: Tag[];
   availableTags: Tag[];
   mutationKey: string;
+  variant?: "default" | "title";
   onAddTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
@@ -31,6 +33,7 @@ export function ArticleTagEditor({
   currentTags,
   availableTags,
   mutationKey,
+  variant = "default",
   onAddTag,
   onRemoveTag,
 }: ArticleTagEditorProps): JSX.Element {
@@ -91,109 +94,149 @@ export function ArticleTagEditor({
     }
   }
 
+  const isTitleVariant = variant === "title";
   const renderedCurrentTags = currentTags.map((tag) => {
     const removeMutationKey = `${articleUUID}:${tag.tag}:remove`;
+    const renderedRemoveButton = (
+      <button
+        type="button"
+        className={`tag-chip-remove ${isTitleVariant ? "title-tag-remove" : ""}`.trim()}
+        onClick={() => {
+          void onRemoveTag(articleUUID, tag.tag);
+        }}
+        disabled={mutationKey === removeMutationKey}
+        aria-label={`Remove ${tag.tag} tag`}
+      >
+        <X className="tag-chip-remove-icon" aria-hidden="true" />
+      </button>
+    );
+
+    if (isTitleVariant) {
+      return (
+        <TitleTag key={tag.tag} className="tag-chip-removable" style={tagChipStyle(tag)}>
+          {tag.tag}
+          {renderedRemoveButton}
+        </TitleTag>
+      );
+    }
+
     return (
       <span key={tag.tag} className="tag-chip tag-chip-removable" style={tagChipStyle(tag)}>
         {tag.tag}
-        <button
-          type="button"
-          className="tag-chip-remove"
-          onClick={() => {
-            void onRemoveTag(articleUUID, tag.tag);
-          }}
-          disabled={mutationKey === removeMutationKey}
-          aria-label={`Remove ${tag.tag} tag`}
-        >
-          <X className="h-3 w-3" aria-hidden="true" />
-        </button>
+        {renderedRemoveButton}
       </span>
     );
   });
 
-  return (
-    <div className="member-tag-tools">
-      {!isInputActive ? (
-        <div className="member-tag-row" aria-label="Article tags">
-          {renderedCurrentTags}
-          {addableTags.length > 0 ? (
-            <button
-              type="button"
-              className="member-tag-add-button"
-              aria-label="Add article tag"
-              title="Add tag"
-              onClick={openInput}
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <div
-          className="member-tag-input-shell is-active"
-          aria-label="Article tags"
-          onMouseDown={clearBlurTimer}
-        >
-          {renderedCurrentTags}
-          <div className="member-tag-input-wrap">
-            <Input
-              value={normalizedInputValue}
-              onFocus={() => {
-                clearBlurTimer();
-                setIsInputActive(true);
-              }}
-              onBlur={() => {
-                blurTimerRef.current = window.setTimeout(closeInput, 120);
-              }}
-              onChange={(event) => {
-                setIsInputActive(true);
-                setInputValue(normalizeTagInput(event.target.value));
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  if (exactTag) {
-                    void addTag(exactTag.tag);
-                  }
-                  return;
-                }
-                if (event.key === "Escape") {
-                  closeInput();
-                }
-              }}
-              className="member-tag-input"
-              placeholder="Add tag"
-              aria-label="Article tag search"
-              autoComplete="off"
-              autoFocus
-              spellCheck={false}
-            />
-            {hasSuggestions ? (
-              <div className="member-tag-suggestions" role="listbox" aria-label="Matching tags">
-                {visibleSuggestions.map((tag) => {
-                  const addMutationKey = `${articleUUID}:${tag.tag}:add`;
-                  return (
-                    <button
-                      key={tag.tag}
-                      type="button"
-                      className="member-tag-suggestion"
-                      style={tagChipStyle(tag)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        void addTag(tag.tag);
-                      }}
-                      disabled={mutationKey === addMutationKey}
-                      role="option"
-                    >
-                      {tag.tag}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
+  const renderedTagRow = (
+    <div
+      className={`member-tag-row ${isTitleVariant ? "member-tag-row-title" : ""}`.trim()}
+      aria-label="Article tags"
+    >
+      {renderedCurrentTags}
+      {addableTags.length > 0 ? (
+        isTitleVariant ? (
+          <TitleActionButton ariaLabel="Add article tag" title="Add tag" onClick={openInput}>
+            <Plus className="title-action-icon" aria-hidden="true" />
+          </TitleActionButton>
+        ) : (
+          <button
+            type="button"
+            className="member-tag-add-button"
+            aria-label="Add article tag"
+            title="Add tag"
+            onClick={openInput}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )
+      ) : null}
     </div>
   );
+  const renderedInputBody = (
+    <>
+      {isTitleVariant ? null : renderedCurrentTags}
+      <div className="member-tag-input-wrap">
+        <Input
+          value={normalizedInputValue}
+          onFocus={() => {
+            clearBlurTimer();
+            setIsInputActive(true);
+          }}
+          onBlur={() => {
+            blurTimerRef.current = window.setTimeout(closeInput, 120);
+          }}
+          onChange={(event) => {
+            setIsInputActive(true);
+            setInputValue(normalizeTagInput(event.target.value));
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (exactTag) {
+                void addTag(exactTag.tag);
+              }
+              return;
+            }
+            if (event.key === "Escape") {
+              closeInput();
+            }
+          }}
+          className="member-tag-input"
+          placeholder="Add tag"
+          aria-label="Article tag search"
+          autoComplete="off"
+          autoFocus
+          spellCheck={false}
+        />
+        {hasSuggestions ? (
+          <div className="member-tag-suggestions" role="listbox" aria-label="Matching tags">
+            {visibleSuggestions.map((tag) => {
+              const addMutationKey = `${articleUUID}:${tag.tag}:add`;
+              return (
+                <button
+                  key={tag.tag}
+                  type="button"
+                  className="member-tag-suggestion"
+                  style={tagChipStyle(tag)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    void addTag(tag.tag);
+                  }}
+                  disabled={mutationKey === addMutationKey}
+                  role="option"
+                >
+                  {tag.tag}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+  const renderedInput = isTitleVariant ? (
+    <TitleTagInput className="member-tag-input-shell-title" onMouseDown={clearBlurTimer}>
+      {renderedInputBody}
+    </TitleTagInput>
+  ) : (
+    <div
+      className="member-tag-input-shell is-active"
+      aria-label="Article tag input"
+      onMouseDown={clearBlurTimer}
+    >
+      {renderedInputBody}
+    </div>
+  );
+
+  if (isTitleVariant) {
+    return (
+      <div className="member-tag-tools member-tag-tools-title">
+        {renderedTagRow}
+        {isInputActive ? renderedInput : null}
+      </div>
+    );
+  }
+
+  return <div className="member-tag-tools">{!isInputActive ? renderedTagRow : renderedInput}</div>;
 }

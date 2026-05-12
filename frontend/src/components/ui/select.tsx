@@ -27,7 +27,8 @@ const selectTriggerVariants = cva(
 );
 
 interface SelectTriggerProps
-  extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>,
+  extends
+    React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>,
     VariantProps<typeof selectTriggerVariants> {}
 
 const SelectTrigger = React.forwardRef<
@@ -93,7 +94,11 @@ const SelectContent = React.forwardRef<
     >
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport
-        className={cn("p-1", position === "popper" && "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]")}
+        className={cn(
+          "p-1",
+          position === "popper" &&
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+        )}
       >
         {children}
       </SelectPrimitive.Viewport>
@@ -107,7 +112,11 @@ const SelectLabel = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Label>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.Label ref={ref} className={cn("px-2 py-1.5 text-xs font-semibold text-panel-400", className)} {...props} />
+  <SelectPrimitive.Label
+    ref={ref}
+    className={cn("px-2 py-1.5 text-xs font-semibold text-panel-400", className)}
+    {...props}
+  />
 ));
 SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
@@ -118,7 +127,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm text-panel-100 outline-none focus:bg-brand-500/20 focus:text-panel-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm text-panel-100 outline-none hover:bg-panel-600 focus:bg-panel-600 focus:text-panel-100 data-[highlighted]:bg-panel-600 data-[highlighted]:text-panel-100 data-[state=checked]:bg-panel-650 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
@@ -138,7 +147,11 @@ const SelectSeparator = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Separator>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.Separator ref={ref} className={cn("-mx-1 my-1 h-px bg-panel-500", className)} {...props} />
+  <SelectPrimitive.Separator
+    ref={ref}
+    className={cn("-mx-1 my-1 h-px bg-panel-500", className)}
+    {...props}
+  />
 ));
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
 

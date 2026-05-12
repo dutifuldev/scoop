@@ -7,7 +7,13 @@ import { buttonVariants } from "./button";
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
-function Calendar({ className, classNames, showOutsideDays = true, components, ...props }: CalendarProps): JSX.Element {
+function Calendar({
+  className,
+  classNames,
+  showOutsideDays = true,
+  components,
+  ...props
+}: CalendarProps): JSX.Element {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
@@ -31,9 +37,14 @@ function Calendar({ className, classNames, showOutsideDays = true, components, .
         weekday: "w-9 rounded-md text-[0.78rem] font-normal text-panel-400",
         week: "mt-1.5 flex w-full",
         day: "h-9 w-9 p-0 text-center text-sm",
-        day_button: cn(buttonVariants({ variant: "ghost" }), "h-9 w-9 rounded-[8px] p-0 font-normal text-panel-100"),
-        selected: "bg-brand-500 text-white hover:bg-brand-500",
-        today: "bg-panel-700 text-panel-100",
+        day_button: cn(
+          buttonVariants({ variant: "ghost" }),
+          "h-9 w-9 rounded-[8px] p-0 font-normal text-panel-100 hover:bg-panel-700 hover:text-panel-100 focus-visible:bg-panel-700",
+        ),
+        selected:
+          "rounded-[8px] bg-panel-600 text-panel-100 hover:bg-panel-600 [&>button]:bg-panel-600 [&>button]:text-panel-100 [&>button]:hover:bg-panel-600",
+        today:
+          "rounded-[8px] bg-panel-700 text-panel-100 [&>button]:bg-panel-700 [&>button]:text-panel-100",
         outside: "text-panel-400 opacity-50",
         disabled: "text-panel-400 opacity-50",
         hidden: "invisible",
@@ -56,4 +67,3 @@ function Calendar({ className, classNames, showOutsideDays = true, components, .
 Calendar.displayName = "Calendar";
 
 export { Calendar };
-

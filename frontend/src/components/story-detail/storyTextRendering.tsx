@@ -44,7 +44,7 @@ function discordAppURL(url: string): string {
   return `discord://-/channels/${match[1]}/${match[2]}/${match[3]}`;
 }
 
-async function copyTextToClipboard(text: string): Promise<boolean> {
+export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard?.writeText(text);
     if (navigator.clipboard) {
@@ -78,12 +78,14 @@ interface DiscordMessageLinkProps {
   url: string;
   label?: string;
   className?: string;
+  compact?: boolean;
 }
 
 export function DiscordMessageLink({
   url,
   label,
   className = "",
+  compact = false,
 }: DiscordMessageLinkProps): JSX.Element {
   const visibleLabel = label || labelForURL(url);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -100,9 +102,10 @@ export function DiscordMessageLink({
         className={`${className || "inline-discord-link"} discord-app-link`.trim()}
         href={discordAppURL(url)}
         title={url}
+        aria-label={compact ? visibleLabel : undefined}
       >
         <DiscordLinkIcon />
-        {visibleLabel}
+        {compact ? <span className="sr-only">{visibleLabel}</span> : visibleLabel}
       </a>
       <span className="discord-link-actions" aria-label="Discord link actions">
         <a

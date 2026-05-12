@@ -1,6 +1,6 @@
 ---
 title: Interest Scale Tags
-author: Bob <dutifulbob@gmail.com>
+author: Scoop Maintainers
 date: 2026-05-12
 ---
 

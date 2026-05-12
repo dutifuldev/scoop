@@ -854,7 +854,7 @@ function StoryReaderSection({
           <div className="reader-story-header">
             <div className="detail-title-row">
               <TitleActions className="detail-title-cluster">
-                <h2 className="detail-title">
+                <h2 className="detail-title" aria-label={displayTitle}>
                   <StoryTitleCopyButton
                     title={displayTitle}
                     collection={detail.story.collection}

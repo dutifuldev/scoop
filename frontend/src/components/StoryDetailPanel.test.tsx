@@ -295,7 +295,9 @@ describe("StoryDetailPanel", () => {
       configurable: true,
       value: { writeText },
     });
-    const titleButton = screen.getByRole("button", { name: "Solo Story" });
+    expect(screen.getByRole("heading", { name: "Solo Story" })).toBeInTheDocument();
+
+    const titleButton = screen.getByRole("button", { name: "Copy story link for Solo Story" });
     expect(titleButton).toHaveAttribute("title", "Copy story link");
     await user.click(titleButton);
     await waitFor(() =>

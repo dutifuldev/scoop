@@ -173,6 +173,7 @@ export function StoryTitleCopyButton({
       onClick={() => {
         void copyStoryLink();
       }}
+      aria-label={`Copy story link for ${displayTitle}`}
       title={statusText}
     >
       {displayTitle}

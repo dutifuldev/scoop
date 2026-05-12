@@ -44,7 +44,7 @@ function discordAppURL(url: string): string {
   return `discord://-/channels/${match[1]}/${match[2]}/${match[3]}`;
 }
 
-async function copyTextToClipboard(text: string): Promise<boolean> {
+export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard?.writeText(text);
     if (navigator.clipboard) {
@@ -72,6 +72,73 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   } finally {
     textarea?.remove();
   }
+}
+
+export function buildStoryShareURL(collection: string, storyUUID: string): string {
+  const normalizedStoryUUID = storyUUID.trim();
+  if (!normalizedStoryUUID) {
+    return "";
+  }
+
+  const normalizedCollection = collection.trim();
+  const storySegment = encodeURIComponent(normalizedStoryUUID);
+  const path = normalizedCollection
+    ? `/c/${encodeURIComponent(normalizedCollection)}/s/${storySegment}`
+    : `/stories/${storySegment}`;
+
+  if (typeof window === "undefined" || !window.location?.origin) {
+    return path;
+  }
+
+  return new URL(path, window.location.origin).toString();
+}
+
+interface StoryTitleCopyButtonProps {
+  title: string;
+  collection: string;
+  storyUUID: string;
+}
+
+export function StoryTitleCopyButton({
+  title,
+  collection,
+  storyUUID,
+}: StoryTitleCopyButtonProps): JSX.Element {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const displayTitle = title || "(untitled)";
+  const statusText =
+    copyState === "copied"
+      ? "Copied story link"
+      : copyState === "failed"
+        ? "Failed to copy story link"
+        : "Copy story link";
+
+  async function copyStoryLink(): Promise<void> {
+    const shareURL = buildStoryShareURL(collection, storyUUID);
+    if (!shareURL) {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+      return;
+    }
+
+    const copied = await copyTextToClipboard(shareURL);
+    setCopyState(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyState("idle"), 1400);
+  }
+
+  return (
+    <button
+      type="button"
+      className={`detail-title-copy-button ${copyState !== "idle" ? "is-active" : ""}`.trim()}
+      onClick={() => {
+        void copyStoryLink();
+      }}
+      title={statusText}
+      aria-label={statusText}
+    >
+      {displayTitle}
+    </button>
+  );
 }
 
 interface DiscordMessageLinkProps {

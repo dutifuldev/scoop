@@ -14,7 +14,7 @@ import {
   StoryArticleGroup,
   type MemberURLGroup,
 } from "./story-detail/StoryArticleGroup";
-import { TitleSourceLink } from "./story-detail/storyTextRendering";
+import { StoryTitleCopyButton, TitleSourceLink } from "./story-detail/storyTextRendering";
 
 const initialReaderStoryCount = 3;
 const readerPageSize = 3;
@@ -854,7 +854,13 @@ function StoryReaderSection({
           <div className="reader-story-header">
             <div className="detail-title-row">
               <div className="detail-title-cluster">
-                <h2 className="detail-title">{displayTitle || "(untitled)"}</h2>
+                <h2 className="detail-title">
+                  <StoryTitleCopyButton
+                    title={displayTitle}
+                    collection={detail.story.collection}
+                    storyUUID={detail.story.story_uuid}
+                  />
+                </h2>
                 {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
                 {singleRepresentative ? (
                   <ArticleTagEditor

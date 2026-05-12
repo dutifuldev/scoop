@@ -289,6 +289,19 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
 
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    await user.click(screen.getByRole("button", { name: "Copy story link" }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        expect.stringContaining("/c/openclaw/s/story-uuid-single"),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Copied story link" })).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "Add article tag" }));
 
     expect(

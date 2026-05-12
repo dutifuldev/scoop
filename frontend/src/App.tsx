@@ -8,7 +8,7 @@ import { DayNavigator } from "./components/header/DayNavigator";
 import { PageShell } from "./components/PageShell";
 import { SettingsModal } from "./components/SettingsModal";
 import { StoriesListPanel } from "./components/StoriesListPanel";
-import { StoryDetailPanel } from "./components/StoryDetailPanel";
+import { StoryReaderPanel } from "./components/StoryReaderPanel";
 import { useCurrentCollectionLabel } from "./hooks/useCurrentCollectionLabel";
 import { useDayNavigationState } from "./hooks/useDayNavigationState";
 import { useViewerQueries } from "./hooks/useViewerQueries";
@@ -17,10 +17,6 @@ import {
   getDesktopFeedWidthPct,
   setDesktopFeedWidthPct,
 } from "./lib/userSettings";
-import {
-  defaultCollectionTranslationMode,
-  isCollectionTranslationEnabled,
-} from "./lib/collectionTranslation";
 import { buildStoryFilters } from "./lib/viewerFilters";
 import { formatCount } from "./lib/viewerFormat";
 import { normalizeLanguageTag } from "./lib/language";
@@ -77,6 +73,8 @@ export function StoryViewerPage(): JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [activeReaderStoryUUID, setActiveReaderStoryUUID] = useState(selectedStoryUUID);
+  const [readerScrollTargetStoryUUID, setReaderScrollTargetStoryUUID] = useState(selectedStoryUUID);
   const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
     if (typeof window === "undefined") {
       return true;
@@ -86,6 +84,14 @@ export function StoryViewerPage(): JSX.Element {
   useEffect(() => {
     setSearchInput(filters.query);
   }, [filters.query]);
+
+  useEffect(() => {
+    if (!selectedStoryUUID) {
+      return;
+    }
+    setActiveReaderStoryUUID(selectedStoryUUID);
+    setReaderScrollTargetStoryUUID(selectedStoryUUID);
+  }, [selectedStoryUUID]);
 
   useEffect(() => {
     if (!showAdvancedSearch && (viewerSearch.from || viewerSearch.to || viewerSearch.tag)) {
@@ -169,24 +175,16 @@ export function StoryViewerPage(): JSX.Element {
     tags,
     dayBuckets,
     stories,
-    detail,
     pagination,
     globalError,
     storiesError,
-    detailError,
     isStoriesPending,
     isFetchingNextStoriesPage,
     hasNextStoriesPage,
     fetchNextStoriesPage,
-    isDetailPending,
   } = useViewerQueries({
     filters: effectiveFilters,
-    selectedStoryUUID,
-    language: apiLanguage,
   });
-  const detailTranslationMode =
-    detail?.story.translation_mode ?? defaultCollectionTranslationMode(filters.collection);
-  const detailActiveLang = isCollectionTranslationEnabled(detailTranslationMode) ? apiLanguage : "";
 
   const { dayNav, selectedDay } = useDayNavigationState({
     dayBuckets,
@@ -194,6 +192,29 @@ export function StoryViewerPage(): JSX.Element {
     from: effectiveFilters.from,
     to: effectiveFilters.to,
   });
+  const readerStateKey = useMemo(
+    () =>
+      [
+        "scoop-reader-state-v1",
+        effectiveFilters.collection,
+        effectiveFilters.query,
+        effectiveFilters.from,
+        effectiveFilters.to,
+        effectiveFilters.tag,
+        effectiveFilters.lang,
+        selectedDay || viewerSearch.day || "",
+      ].join("|"),
+    [
+      effectiveFilters.collection,
+      effectiveFilters.from,
+      effectiveFilters.lang,
+      effectiveFilters.query,
+      effectiveFilters.tag,
+      effectiveFilters.to,
+      selectedDay,
+      viewerSearch.day,
+    ],
+  );
 
   const allStoriesCount = useMemo(
     () => collections.reduce((acc, row) => acc + Number(row.stories || 0), 0),
@@ -258,35 +279,41 @@ export function StoryViewerPage(): JSX.Element {
   function goToStory(storyUUID: string): void {
     const story = stories.find((row) => row.story_uuid === storyUUID);
     const collection = (story?.collection || routeCollection || filters.collection || "").trim();
+    setActiveReaderStoryUUID(storyUUID);
+    setReaderScrollTargetStoryUUID(storyUUID);
     navigateToStoryPath(collection, storyUUID);
   }
 
-  function goToItem(itemUUID: string): void {
-    if (!selectedStoryUUID) {
+  function goToItem(storyUUID: string, itemUUID: string, collectionHint?: string): void {
+    if (!storyUUID || !itemUUID) {
       return;
     }
 
+    const story = stories.find((row) => row.story_uuid === storyUUID);
     const collection = (
-      detail?.story.collection ||
+      story?.collection ||
+      collectionHint ||
       routeCollection ||
       filters.collection ||
       ""
     ).trim();
-    navigateToStoryPath(collection, selectedStoryUUID, itemUUID);
+    navigateToStoryPath(collection, storyUUID, itemUUID);
   }
 
-  function clearSelectedItem(): void {
-    if (!selectedStoryUUID) {
+  function clearSelectedItem(storyUUID: string, collectionHint?: string): void {
+    if (!storyUUID) {
       return;
     }
 
+    const story = stories.find((row) => row.story_uuid === storyUUID);
     const collection = (
-      detail?.story.collection ||
+      story?.collection ||
+      collectionHint ||
       routeCollection ||
       filters.collection ||
       ""
     ).trim();
-    navigateToStoryPath(collection, selectedStoryUUID);
+    navigateToStoryPath(collection, storyUUID);
   }
 
   useEffect(() => {
@@ -500,7 +527,7 @@ export function StoryViewerPage(): JSX.Element {
               translatingStoryUUIDs={translatingStoryUUIDs}
               totalItems={pagination.total_items}
               loadedItems={stories.length}
-              selectedStoryUUID={selectedStoryUUID}
+              selectedStoryUUID={activeReaderStoryUUID || selectedStoryUUID}
               stories={stories}
               isLoading={isStoriesPending}
               isFetchingNextPage={isFetchingNextStoriesPage}
@@ -530,17 +557,28 @@ export function StoryViewerPage(): JSX.Element {
           />
 
           <Panel id="storyDetail" minSize={isDesktopLayout ? "20%" : "30%"}>
-            <StoryDetailPanel
+            <StoryReaderPanel
               selectedStoryUUID={selectedStoryUUID}
               selectedItemUUID={selectedItemUUID}
-              detail={detail}
+              scrollTargetStoryUUID={readerScrollTargetStoryUUID}
+              stories={stories}
               availableTags={tags}
-              activeLang={detailActiveLang}
-              isLoading={isDetailPending}
-              error={detailError}
+              activeLang={apiLanguage}
+              isLoadingStories={isStoriesPending}
+              storiesError={storiesError}
+              hasNextStoryPage={hasNextStoriesPage}
+              isFetchingNextStoryPage={isFetchingNextStoriesPage}
+              readerStateKey={readerStateKey}
+              onLoadNextStoryPage={fetchNextStoriesPage}
+              onActiveStoryChange={setActiveReaderStoryUUID}
               onSelectItem={goToItem}
               onClearSelectedItem={clearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}
+              onScrollTargetSettled={(storyUUID) => {
+                setReaderScrollTargetStoryUUID((previous) =>
+                  previous === storyUUID ? "" : previous,
+                );
+              }}
             />
           </Panel>
         </Group>

@@ -275,7 +275,29 @@ Evidence:
       "href",
       "https://discord.com/channels/1/2/3",
     );
-    expect(screen.getByRole("button", { name: "Copy Discord message link" })).toBeInTheDocument();
+    const copyButton = screen.getByRole("button", { name: "Copy Discord message link" });
+    expect(copyButton).toBeInTheDocument();
+
+    const writeText = vi.fn(async () => {
+      throw new Error("blocked");
+    });
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+    await userEvent.click(copyButton);
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("https://discord.com/channels/1/2/3"),
+    );
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(screen.getByRole("button", { name: "Copy Discord message link" })).toHaveTextContent(
+      "Copied",
+    );
     expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("member-1", 4000);
   });
 

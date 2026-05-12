@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Copy, ExternalLink } from "lucide-react";
 
 import discordLogoURL from "../../assets/discord.svg";
@@ -44,6 +44,36 @@ function discordAppURL(url: string): string {
   return `discord://-/channels/${match[1]}/${match[2]}/${match[3]}`;
 }
 
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard?.writeText(text);
+    if (navigator.clipboard) {
+      return true;
+    }
+  } catch {
+    // Fall back below for HTTP or denied Clipboard API contexts.
+  }
+
+  let textarea: HTMLTextAreaElement | null = null;
+  try {
+    textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea?.remove();
+  }
+}
+
 interface DiscordMessageLinkProps {
   url: string;
   label?: string;
@@ -56,13 +86,12 @@ export function DiscordMessageLink({
   className = "",
 }: DiscordMessageLinkProps): JSX.Element {
   const visibleLabel = label || labelForURL(url);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   async function copyBrowserLink(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // Clipboard writes can fail outside secure contexts; the browser option still exposes the URL.
-    }
+    const copied = await copyTextToClipboard(url);
+    setCopyState(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyState("idle"), 1400);
   }
 
   return (
@@ -97,7 +126,7 @@ export function DiscordMessageLink({
           aria-label="Copy Discord message link"
         >
           <Copy className="h-3 w-3" aria-hidden="true" />
-          Copy
+          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Failed" : "Copy"}
         </button>
       </span>
     </span>

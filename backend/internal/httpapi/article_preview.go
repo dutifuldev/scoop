@@ -64,7 +64,8 @@ SELECT
 	sm.story_article_uuid::text,
 	d.normalized_text,
 	d.canonical_url,
-	d.normalized_title
+	d.normalized_title,
+	d.source
 FROM news.story_articles sm
 JOIN news.articles d
 	ON d.article_id = sm.article_id
@@ -78,6 +79,7 @@ LIMIT 1
 		rowNormalizedText   *string
 		rowCanonicalURL     *string
 		rowTitle            string
+		rowSource           string
 	)
 
 	if err := s.pool.QueryRow(ctx, q, storyArticleUUID).Scan(
@@ -85,6 +87,7 @@ LIMIT 1
 		&rowNormalizedText,
 		&rowCanonicalURL,
 		&rowTitle,
+		&rowSource,
 	); err != nil {
 		if errors.Is(err, db.ErrNoRows) {
 			return nil, errStoryArticleNotFound
@@ -97,7 +100,7 @@ LIMIT 1
 		normalizedText = strings.TrimSpace(*rowNormalizedText)
 	}
 
-	previewRaw, source, previewErr := buildArticlePreviewText(ctx, rowCanonicalURL, rowTitle, normalizedText)
+	previewRaw, source, previewErr := buildArticlePreviewText(ctx, rowCanonicalURL, rowTitle, normalizedText, rowSource)
 	previewText, truncated := truncatePreviewText(previewRaw, maxChars)
 
 	resp := &storyArticlePreview{
@@ -125,7 +128,12 @@ func buildArticlePreviewText(
 	canonicalURL *string,
 	normalizedTitle string,
 	normalizedText string,
+	sourceName string,
 ) (string, string, error) {
+	if strings.EqualFold(strings.TrimSpace(sourceName), "discord_archive") && normalizedText != "" {
+		return normalizedText, "normalized_text", nil
+	}
+
 	url := strings.TrimSpace(derefString(canonicalURL))
 	if url != "" {
 		readerText, err := fetchReaderPreviewText(ctx, url, normalizedTitle)

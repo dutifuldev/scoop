@@ -26,7 +26,7 @@ func TestTruncatePreviewText(t *testing.T) {
 }
 
 func TestBuildArticlePreviewTextFallsBackToNormalizedTextWhenNoURL(t *testing.T) {
-	text, source, err := buildArticlePreviewText(context.Background(), nil, "title", "normalized body")
+	text, source, err := buildArticlePreviewText(context.Background(), nil, "title", "normalized body", "rss")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -324,7 +324,7 @@
   }
 
   .sidebar-user {
-    @apply relative mt-2.5 border-t border-panel-500 px-3 pt-3;
+    @apply relative mt-2.5 border-t border-panel-500 px-3 pb-3 pt-3;
   }
 
   .sidebar-user-trigger {

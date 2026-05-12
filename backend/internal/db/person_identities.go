@@ -490,17 +490,7 @@ func personIdentityModelsToRecords(identities []PersonIdentity) []PersonIdentity
 }
 
 func personIdentityModelToRecord(identity PersonIdentity) PersonIdentityRecord {
-	return PersonIdentityRecord{
-		PersonIdentityID:   identity.PersonIdentityID,
-		PersonIdentityUUID: identity.PersonIdentityUUID,
-		Provider:           identity.Provider,
-		ProviderUserID:     identity.ProviderUserID,
-		Handle:             identity.Handle,
-		IdentityRef:        identity.IdentityRef,
-		ArchivedAt:         identity.ArchivedAt,
-		CreatedAt:          identity.CreatedAt,
-		UpdatedAt:          identity.UpdatedAt,
-	}
+	return PersonIdentityRecord(identity)
 }
 
 type articlePersonIdentityRow struct {

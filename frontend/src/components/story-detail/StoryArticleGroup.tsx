@@ -4,12 +4,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
-import {
-  buildMemberPreview,
-  renderTextBlock,
-  TitleSourceLink,
-  toParagraphs,
-} from "./storyTextRendering";
+import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
+import { TitleActions, TitleSourceLink } from "./TitleActions";
 
 export interface MemberURLGroup {
   key: string;
@@ -143,7 +139,7 @@ export function StoryArticleGroup({
       {isMergedStory ? (
         <>
           <div className="member-title-row">
-            <div className="member-title-cluster">
+            <TitleActions className="member-title-cluster">
               <button
                 type="button"
                 className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
@@ -188,7 +184,7 @@ export function StoryArticleGroup({
                   onRemoveTag={onRemoveArticleTag}
                 />
               ) : null}
-            </div>
+            </TitleActions>
           </div>
           <p className="member-sub">
             matched {formatDateTime(representative.matched_at)} • published{" "}

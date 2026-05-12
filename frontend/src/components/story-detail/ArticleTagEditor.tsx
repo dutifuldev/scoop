@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 
 import type { Tag } from "../../types";
 import { Input } from "../ui/input";
+import { TitleActionButton, TitleTag, TitleTagInput } from "./TitleActions";
 
 interface ArticleTagEditorProps {
   articleUUID: string;
@@ -93,27 +94,40 @@ export function ArticleTagEditor({
     }
   }
 
+  const isTitleVariant = variant === "title";
   const renderedCurrentTags = currentTags.map((tag) => {
     const removeMutationKey = `${articleUUID}:${tag.tag}:remove`;
+    const renderedRemoveButton = (
+      <button
+        type="button"
+        className={`tag-chip-remove ${isTitleVariant ? "title-tag-remove" : ""}`.trim()}
+        onClick={() => {
+          void onRemoveTag(articleUUID, tag.tag);
+        }}
+        disabled={mutationKey === removeMutationKey}
+        aria-label={`Remove ${tag.tag} tag`}
+      >
+        <X className="tag-chip-remove-icon" aria-hidden="true" />
+      </button>
+    );
+
+    if (isTitleVariant) {
+      return (
+        <TitleTag key={tag.tag} className="tag-chip-removable" style={tagChipStyle(tag)}>
+          {tag.tag}
+          {renderedRemoveButton}
+        </TitleTag>
+      );
+    }
+
     return (
       <span key={tag.tag} className="tag-chip tag-chip-removable" style={tagChipStyle(tag)}>
         {tag.tag}
-        <button
-          type="button"
-          className="tag-chip-remove"
-          onClick={() => {
-            void onRemoveTag(articleUUID, tag.tag);
-          }}
-          disabled={mutationKey === removeMutationKey}
-          aria-label={`Remove ${tag.tag} tag`}
-        >
-          <X className="h-3 w-3" aria-hidden="true" />
-        </button>
+        {renderedRemoveButton}
       </span>
     );
   });
 
-  const isTitleVariant = variant === "title";
   const renderedTagRow = (
     <div
       className={`member-tag-row ${isTitleVariant ? "member-tag-row-title" : ""}`.trim()}
@@ -121,24 +135,26 @@ export function ArticleTagEditor({
     >
       {renderedCurrentTags}
       {addableTags.length > 0 ? (
-        <button
-          type="button"
-          className="member-tag-add-button"
-          aria-label="Add article tag"
-          title="Add tag"
-          onClick={openInput}
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        isTitleVariant ? (
+          <TitleActionButton ariaLabel="Add article tag" title="Add tag" onClick={openInput}>
+            <Plus className="title-action-icon" aria-hidden="true" />
+          </TitleActionButton>
+        ) : (
+          <button
+            type="button"
+            className="member-tag-add-button"
+            aria-label="Add article tag"
+            title="Add tag"
+            onClick={openInput}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )
       ) : null}
     </div>
   );
-  const renderedInput = (
-    <div
-      className={`member-tag-input-shell is-active ${isTitleVariant ? "member-tag-input-shell-title" : ""}`.trim()}
-      aria-label="Article tag input"
-      onMouseDown={clearBlurTimer}
-    >
+  const renderedInputBody = (
+    <>
       {isTitleVariant ? null : renderedCurrentTags}
       <div className="member-tag-input-wrap">
         <Input
@@ -197,6 +213,19 @@ export function ArticleTagEditor({
           </div>
         ) : null}
       </div>
+    </>
+  );
+  const renderedInput = isTitleVariant ? (
+    <TitleTagInput className="member-tag-input-shell-title" onMouseDown={clearBlurTimer}>
+      {renderedInputBody}
+    </TitleTagInput>
+  ) : (
+    <div
+      className="member-tag-input-shell is-active"
+      aria-label="Article tag input"
+      onMouseDown={clearBlurTimer}
+    >
+      {renderedInputBody}
     </div>
   );
 

@@ -14,7 +14,7 @@ import {
   StoryArticleGroup,
   type MemberURLGroup,
 } from "./story-detail/StoryArticleGroup";
-import { StoryTitleCopyButton, TitleSourceLink } from "./story-detail/storyTextRendering";
+import { StoryTitleCopyButton, TitleActions, TitleSourceLink } from "./story-detail/TitleActions";
 
 const initialReaderStoryCount = 3;
 const readerPageSize = 3;
@@ -853,7 +853,7 @@ function StoryReaderSection({
         <>
           <div className="reader-story-header">
             <div className="detail-title-row">
-              <div className="detail-title-cluster">
+              <TitleActions className="detail-title-cluster">
                 <h2 className="detail-title">
                   <StoryTitleCopyButton
                     title={displayTitle}
@@ -873,7 +873,7 @@ function StoryReaderSection({
                     onRemoveTag={onRemoveArticleTag}
                   />
                 ) : null}
-              </div>
+              </TitleActions>
             </div>
             {showTranslatedTitle ? (
               <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>

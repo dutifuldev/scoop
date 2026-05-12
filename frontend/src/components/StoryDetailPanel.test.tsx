@@ -280,9 +280,10 @@ describe("StoryDetailPanel", () => {
     expect(screen.getAllByText("Solo Story")).toHaveLength(1);
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
     expect(screen.getByText(/published .*source-a/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "solo.example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "solo.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".detail-title-row .member-tag-tools-title")).not.toBeNull();
-    expect(screen.getByText("i0")).toBeInTheDocument();
+    expect(screen.getByText("i0")).toHaveClass("title-tag");
+    expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
     expect(container.querySelector(".member-card-single")).not.toBeNull();
     expect(container.querySelector(".detail-item-content-single")).not.toBeNull();
     expect(container.querySelector(".detail-text-block-single")).not.toBeNull();
@@ -357,12 +358,54 @@ describe("StoryDetailPanel", () => {
 
     expect(screen.getByText("First item")).toBeInTheDocument();
     expect(screen.getByText("Second item")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "a.example.com" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "b.example.com" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "a.example.com" })).toHaveClass("title-action");
+    expect(screen.getByRole("link", { name: "b.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
-    expect(screen.getByText("i0")).toBeInTheDocument();
+    expect(screen.getByText("i0")).toHaveClass("title-tag");
     expect(container.querySelector(".member-card-single")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
+  });
+
+  it("renders Discord title source links with shared title action geometry", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeSingleArticleDetail();
+    detail.story.canonical_url = "https://discord.com/channels/1/2/3";
+    detail.members[0].canonical_url = "https://discord.com/channels/1/2/3";
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[
+            {
+              tag_id: 14,
+              tag_uuid: "tag-uuid-needs-review-discord",
+              tag: "needs-review",
+              color: "#71767b",
+              created_at: "2026-02-14T09:00:00Z",
+              updated_at: "2026-02-14T09:00:00Z",
+            },
+          ]}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const discordSourceLink = await screen.findByRole("link", { name: "Discord message" });
+    expect(discordSourceLink).toHaveClass("title-action");
+    expect(discordSourceLink.querySelector("img.discord-link-icon")).not.toBeNull();
+    expect(screen.getByText("i0")).toHaveClass("title-tag");
+    expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
   });
 
   it("renders same-url members as separate visible items", async () => {

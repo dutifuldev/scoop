@@ -336,8 +336,17 @@
     @apply flex min-w-0 items-start;
   }
 
+  .title-actions {
+    --title-action-size: 1.35rem;
+    --title-action-icon-size: 0.75rem;
+    --title-action-gap: 0.375rem;
+    @apply flex min-w-0 max-w-full flex-wrap items-start;
+    column-gap: var(--title-action-gap);
+    row-gap: 0.25rem;
+  }
+
   .detail-title-cluster {
-    @apply flex min-w-0 max-w-full flex-wrap items-start gap-x-1.5 gap-y-1;
+    @apply min-w-0;
   }
 
   .detail-title {
@@ -356,14 +365,25 @@
     @apply text-panel-400;
   }
 
-  .title-source-link {
-    @apply inline-flex h-[1.15em] w-[1.15em] shrink-0 items-center justify-center rounded-full text-panel-400 no-underline transition hover:bg-panel-700 hover:text-panel-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
-    line-height: inherit;
+  .title-action {
+    @apply inline-flex shrink-0 items-center justify-center rounded-full border border-transparent bg-transparent p-0 text-panel-400 no-underline transition hover:bg-panel-700 hover:text-panel-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35 disabled:cursor-not-allowed disabled:opacity-40;
+    width: var(--title-action-size);
+    height: var(--title-action-size);
+    line-height: 1;
   }
 
-  .title-source-link-icon,
-  .title-source-link .discord-link-icon {
-    @apply h-[0.72em] w-[0.72em];
+  .title-action-icon,
+  .title-action .discord-link-icon {
+    width: var(--title-action-icon-size);
+    height: var(--title-action-icon-size);
+  }
+
+  .title-source-link {
+    @apply text-panel-400;
+  }
+
+  .title-action-button {
+    @apply border-panel-500 bg-panel-700/60;
   }
 
   .detail-title-original {
@@ -473,7 +493,7 @@
   }
 
   .member-title-cluster {
-    @apply flex min-w-0 max-w-full flex-wrap items-start gap-x-1.5 gap-y-1;
+    @apply min-w-0;
   }
 
   .member-title-row .member-toggle {
@@ -531,7 +551,9 @@
   }
 
   .member-tag-row-title {
-    @apply min-h-[1.35rem] justify-start;
+    min-height: var(--title-action-size, 1.35rem);
+    gap: var(--title-action-gap, 0.375rem);
+    @apply justify-start;
   }
 
   .member-tag-row-compact {
@@ -548,6 +570,10 @@
 
   .member-tag-input-shell-title {
     @apply w-[min(280px,70vw)] flex-nowrap justify-start;
+  }
+
+  .title-tag-input {
+    @apply max-w-[520px];
   }
 
   .member-tag-input-shell.is-active {
@@ -592,6 +618,11 @@
     color: color-mix(in srgb, var(--tag-color) 78%, white);
   }
 
+  .title-tag {
+    min-height: var(--title-action-size, 1.35rem);
+    @apply px-1.5 py-0;
+  }
+
   .tag-chip-small {
     @apply min-h-[14px] px-1 py-0 text-[0.58rem];
   }
@@ -602,6 +633,14 @@
 
   .tag-chip-remove {
     @apply inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  .tag-chip-remove-icon {
+    @apply h-3 w-3;
+  }
+
+  .title-tag-remove {
+    @apply h-4 w-4;
   }
 
   .member-decision-inline {

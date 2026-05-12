@@ -74,73 +74,6 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function buildStoryShareURL(collection: string, storyUUID: string): string {
-  const normalizedStoryUUID = storyUUID.trim();
-  if (!normalizedStoryUUID) {
-    return "";
-  }
-
-  const normalizedCollection = collection.trim();
-  const storySegment = encodeURIComponent(normalizedStoryUUID);
-  const path = normalizedCollection
-    ? `/c/${encodeURIComponent(normalizedCollection)}/s/${storySegment}`
-    : `/stories/${storySegment}`;
-
-  if (typeof window === "undefined" || !window.location?.origin) {
-    return path;
-  }
-
-  return new URL(path, window.location.origin).toString();
-}
-
-interface StoryTitleCopyButtonProps {
-  title: string;
-  collection: string;
-  storyUUID: string;
-}
-
-export function StoryTitleCopyButton({
-  title,
-  collection,
-  storyUUID,
-}: StoryTitleCopyButtonProps): JSX.Element {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  const displayTitle = title || "(untitled)";
-  const statusText =
-    copyState === "copied"
-      ? "Copied story link"
-      : copyState === "failed"
-        ? "Failed to copy story link"
-        : "Copy story link";
-
-  async function copyStoryLink(): Promise<void> {
-    const shareURL = buildStoryShareURL(collection, storyUUID);
-    if (!shareURL) {
-      setCopyState("failed");
-      window.setTimeout(() => setCopyState("idle"), 1400);
-      return;
-    }
-
-    const copied = await copyTextToClipboard(shareURL);
-    setCopyState(copied ? "copied" : "failed");
-    window.setTimeout(() => setCopyState("idle"), 1400);
-  }
-
-  return (
-    <button
-      type="button"
-      className={`detail-title-copy-button ${copyState !== "idle" ? "is-active" : ""}`.trim()}
-      onClick={() => {
-        void copyStoryLink();
-      }}
-      title={statusText}
-      aria-label={statusText}
-    >
-      {displayTitle}
-    </button>
-  );
-}
-
 interface DiscordMessageLinkProps {
   url: string;
   label?: string;
@@ -200,43 +133,6 @@ export function DiscordMessageLink({
         </button>
       </span>
     </span>
-  );
-}
-
-interface TitleSourceLinkProps {
-  url: string;
-}
-
-export function TitleSourceLink({ url }: TitleSourceLinkProps): JSX.Element | null {
-  const trimmedURL = url.trim();
-  if (!trimmedURL) {
-    return null;
-  }
-
-  const label = labelForURL(trimmedURL);
-  if (discordMessagePattern.test(trimmedURL)) {
-    return (
-      <DiscordMessageLink
-        url={trimmedURL}
-        label={label}
-        className="title-source-link title-source-link-discord"
-        compact
-      />
-    );
-  }
-
-  return (
-    <a
-      className="title-source-link"
-      href={trimmedURL}
-      target="_blank"
-      rel="noreferrer"
-      title={trimmedURL}
-      aria-label={label}
-    >
-      <ExternalLink className="title-source-link-icon" aria-hidden="true" />
-      <span className="sr-only">{label}</span>
-    </a>
   );
 }
 

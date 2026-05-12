@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { useAuth } from "./auth";
@@ -76,12 +76,82 @@ export function StoryViewerPage(): JSX.Element {
   const [activeReaderStoryUUID, setActiveReaderStoryUUID] = useState(selectedStoryUUID);
   const [readerScrollTargetStoryUUID, setReaderScrollTargetStoryUUID] = useState(selectedStoryUUID);
   const [readerScrollTargetRevision, setReaderScrollTargetRevision] = useState(0);
+  const passiveStoryURLTimerRef = useRef<number | null>(null);
+  const pendingPassiveStoryUUIDRef = useRef("");
+  const passiveURLStoryUUIDRef = useRef("");
   const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
     if (typeof window === "undefined") {
       return true;
     }
     return window.matchMedia("(min-width: 1021px)").matches;
   });
+
+  const compactSearchForCurrentPath = useCallback((nextSearch: ViewerSearch): ViewerSearch => {
+    const keepDateFilters = showAdvancedSearch;
+
+    return compactViewerSearch({
+      ...nextSearch,
+      collection: routeCollection ? undefined : nextSearch.collection,
+      day: keepDateFilters ? undefined : nextSearch.day,
+      from: keepDateFilters ? nextSearch.from : undefined,
+      to: keepDateFilters ? nextSearch.to : undefined,
+    });
+  }, [routeCollection, showAdvancedSearch]);
+
+  const clearPassiveStoryURLTimer = useCallback((): void => {
+    if (passiveStoryURLTimerRef.current !== null) {
+      window.clearTimeout(passiveStoryURLTimerRef.current);
+      passiveStoryURLTimerRef.current = null;
+    }
+    pendingPassiveStoryUUIDRef.current = "";
+  }, []);
+
+  const applySearch = useCallback((nextSearch: ViewerSearch): void => {
+    clearPassiveStoryURLTimer();
+    void navigate({
+      to: ".",
+      search: compactSearchForCurrentPath(nextSearch),
+      replace: true,
+    });
+  }, [clearPassiveStoryURLTimer, compactSearchForCurrentPath, navigate]);
+
+  const navigateToStoryPath = useCallback((
+    collection: string,
+    storyUUID: string,
+    itemUUID?: string,
+    options?: { replace?: boolean },
+  ): void => {
+    const currentSearch = compactSearchForCurrentPath(viewerSearch);
+    const replace = options?.replace ?? false;
+
+    if (collection) {
+      if (itemUUID) {
+        void navigate({
+          to: "/c/$collection/s/$storyUUID/i/$itemUUID",
+          params: { collection, storyUUID, itemUUID },
+          search: currentSearch,
+          replace,
+        });
+        return;
+      }
+
+      void navigate({
+        to: "/c/$collection/s/$storyUUID",
+        params: { collection, storyUUID },
+        search: currentSearch,
+        replace,
+      });
+      return;
+    }
+
+    void navigate({
+      to: "/stories/$storyUUID",
+      params: { storyUUID },
+      search: currentSearch,
+      replace,
+    });
+  }, [compactSearchForCurrentPath, navigate, viewerSearch]);
+
   useEffect(() => {
     setSearchInput(filters.query);
   }, [filters.query]);
@@ -91,8 +161,17 @@ export function StoryViewerPage(): JSX.Element {
       return;
     }
     setActiveReaderStoryUUID(selectedStoryUUID);
+    if (passiveURLStoryUUIDRef.current === selectedStoryUUID) {
+      passiveURLStoryUUIDRef.current = "";
+      return;
+    }
+    passiveURLStoryUUIDRef.current = "";
     setReaderScrollTargetStoryUUID(selectedStoryUUID);
   }, [selectedStoryUUID]);
+
+  useEffect(() => {
+    clearPassiveStoryURLTimer();
+  }, [clearPassiveStoryURLTimer, routeCollection, selectedItemUUID, selectedStoryUUID, viewerSearch]);
 
   useEffect(() => {
     if (!showAdvancedSearch && (viewerSearch.from || viewerSearch.to || viewerSearch.tag)) {
@@ -106,7 +185,7 @@ export function StoryViewerPage(): JSX.Element {
         page: undefined,
       });
     }
-  }, [showAdvancedSearch, viewerSearch]);
+  }, [applySearch, showAdvancedSearch, viewerSearch]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -226,60 +305,10 @@ export function StoryViewerPage(): JSX.Element {
     [allStoriesCount, pagination.total_items],
   );
 
-  function compactSearchForCurrentPath(nextSearch: ViewerSearch): ViewerSearch {
-    const keepDateFilters = showAdvancedSearch;
-
-    return compactViewerSearch({
-      ...nextSearch,
-      collection: routeCollection ? undefined : nextSearch.collection,
-      day: keepDateFilters ? undefined : nextSearch.day,
-      from: keepDateFilters ? nextSearch.from : undefined,
-      to: keepDateFilters ? nextSearch.to : undefined,
-    });
-  }
-
-  function applySearch(nextSearch: ViewerSearch): void {
-    void navigate({
-      to: ".",
-      search: compactSearchForCurrentPath(nextSearch),
-      replace: true,
-    });
-  }
-
-  function navigateToStoryPath(collection: string, storyUUID: string, itemUUID?: string): void {
-    const currentSearch = compactSearchForCurrentPath(viewerSearch);
-
-    if (collection) {
-      if (itemUUID) {
-        void navigate({
-          to: "/c/$collection/s/$storyUUID/i/$itemUUID",
-          params: { collection, storyUUID, itemUUID },
-          search: currentSearch,
-          replace: false,
-        });
-        return;
-      }
-
-      void navigate({
-        to: "/c/$collection/s/$storyUUID",
-        params: { collection, storyUUID },
-        search: currentSearch,
-        replace: false,
-      });
-      return;
-    }
-
-    void navigate({
-      to: "/stories/$storyUUID",
-      params: { storyUUID },
-      search: currentSearch,
-      replace: false,
-    });
-  }
-
   function goToStory(storyUUID: string): void {
     const story = stories.find((row) => row.story_uuid === storyUUID);
     const collection = (story?.collection || routeCollection || filters.collection || "").trim();
+    clearPassiveStoryURLTimer();
     setActiveReaderStoryUUID(storyUUID);
     setReaderScrollTargetStoryUUID(storyUUID);
     setReaderScrollTargetRevision((previous) => previous + 1);
@@ -299,6 +328,7 @@ export function StoryViewerPage(): JSX.Element {
       filters.collection ||
       ""
     ).trim();
+    clearPassiveStoryURLTimer();
     navigateToStoryPath(collection, storyUUID, itemUUID);
   }
 
@@ -315,6 +345,7 @@ export function StoryViewerPage(): JSX.Element {
       filters.collection ||
       ""
     ).trim();
+    clearPassiveStoryURLTimer();
     navigateToStoryPath(collection, storyUUID);
   }
 
@@ -336,7 +367,7 @@ export function StoryViewerPage(): JSX.Element {
     return () => {
       window.clearTimeout(handle);
     };
-  }, [searchInput, viewerSearch]);
+  }, [applySearch, searchInput, viewerSearch]);
 
   function setSingleDayFilter(day: string): void {
     if (!day) {
@@ -371,6 +402,7 @@ export function StoryViewerPage(): JSX.Element {
   }
 
   function onCollectionChange(collection: string): void {
+    clearPassiveStoryURLTimer();
     const nextSearch = compactSearchForCurrentPath({
       ...viewerSearch,
       collection: undefined,
@@ -472,6 +504,42 @@ export function StoryViewerPage(): JSX.Element {
   const onReaderScrollTargetSettled = useCallback((storyUUID: string) => {
     setReaderScrollTargetStoryUUID((previous) => (previous === storyUUID ? "" : previous));
   }, []);
+  const onReaderActiveStoryChange = useCallback(
+    (storyUUID: string) => {
+      setActiveReaderStoryUUID(storyUUID);
+      clearPassiveStoryURLTimer();
+      if (!storyUUID || storyUUID === selectedStoryUUID || readerScrollTargetStoryUUID) {
+        return;
+      }
+
+      pendingPassiveStoryUUIDRef.current = storyUUID;
+      passiveStoryURLTimerRef.current = window.setTimeout(() => {
+        passiveStoryURLTimerRef.current = null;
+        const nextStoryUUID = pendingPassiveStoryUUIDRef.current;
+        pendingPassiveStoryUUIDRef.current = "";
+        if (!nextStoryUUID || nextStoryUUID === selectedStoryUUID) {
+          return;
+        }
+
+        const collection = routeCollection.trim();
+        passiveURLStoryUUIDRef.current = nextStoryUUID;
+        navigateToStoryPath(collection, nextStoryUUID, undefined, { replace: true });
+      }, 220);
+    },
+    [
+      clearPassiveStoryURLTimer,
+      navigateToStoryPath,
+      readerScrollTargetStoryUUID,
+      routeCollection,
+      selectedStoryUUID,
+    ],
+  );
+
+  useEffect(() => {
+    return () => {
+      clearPassiveStoryURLTimer();
+    };
+  }, [clearPassiveStoryURLTimer]);
 
   const currentCollectionLabel = useCurrentCollectionLabel(collections, filters.collection);
 
@@ -576,7 +644,7 @@ export function StoryViewerPage(): JSX.Element {
               isFetchingNextStoryPage={isFetchingNextStoriesPage}
               readerStateKey={readerStateKey}
               onLoadNextStoryPage={fetchNextStoriesPage}
-              onActiveStoryChange={setActiveReaderStoryUUID}
+              onActiveStoryChange={onReaderActiveStoryChange}
               onSelectItem={goToItem}
               onClearSelectedItem={clearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}

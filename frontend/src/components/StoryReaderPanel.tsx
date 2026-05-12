@@ -253,11 +253,15 @@ export function StoryReaderPanel({
     }
 
     setPinnedStoryUUID((previous) => {
+      if (selectedStoryInLoadedStories) {
+        return "";
+      }
+
       if (previous === selectedStoryUUID) {
         return previous;
       }
 
-      return selectedStoryInLoadedStories ? "" : selectedStoryUUID;
+      return selectedStoryUUID;
     });
   }, [selectedStoryInLoadedStories, selectedStoryUUID]);
 
@@ -514,6 +518,11 @@ export function StoryReaderPanel({
       setVisibleCount((previous) => Math.max(previous, targetIndex + 1));
     }
 
+    const targetIsPinned = pinnedStoryUUID === scrollTargetStoryUUID;
+    if (targetIsPinned && selectedStoryInLoadedStories) {
+      return;
+    }
+
     const cancelProgrammaticScroll = (): void => {
       if (programmaticScrollTimerRef.current !== null) {
         window.clearTimeout(programmaticScrollTimerRef.current);
@@ -533,6 +542,9 @@ export function StoryReaderPanel({
       }
       target.scrollIntoView({ block: "start", inline: "nearest", behavior: "smooth" });
       setActiveStoryUUID(scrollTargetStoryUUID);
+      if (targetIsPinned) {
+        return;
+      }
       if (programmaticScrollTimerRef.current !== null) {
         window.clearTimeout(programmaticScrollTimerRef.current);
       }
@@ -557,8 +569,10 @@ export function StoryReaderPanel({
     };
   }, [
     onScrollTargetSettled,
+    pinnedStoryUUID,
     scrollTargetRevision,
     scrollTargetStoryUUID,
+    selectedStoryInLoadedStories,
     setActiveStoryUUID,
     storyUUIDs,
     visibleStoryUUIDs.length,

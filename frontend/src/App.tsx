@@ -75,6 +75,7 @@ export function StoryViewerPage(): JSX.Element {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [activeReaderStoryUUID, setActiveReaderStoryUUID] = useState(selectedStoryUUID);
   const [readerScrollTargetStoryUUID, setReaderScrollTargetStoryUUID] = useState(selectedStoryUUID);
+  const [readerScrollTargetRevision, setReaderScrollTargetRevision] = useState(0);
   const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
     if (typeof window === "undefined") {
       return true;
@@ -281,6 +282,7 @@ export function StoryViewerPage(): JSX.Element {
     const collection = (story?.collection || routeCollection || filters.collection || "").trim();
     setActiveReaderStoryUUID(storyUUID);
     setReaderScrollTargetStoryUUID(storyUUID);
+    setReaderScrollTargetRevision((previous) => previous + 1);
     navigateToStoryPath(collection, storyUUID);
   }
 
@@ -561,6 +563,7 @@ export function StoryViewerPage(): JSX.Element {
               selectedStoryUUID={selectedStoryUUID}
               selectedItemUUID={selectedItemUUID}
               scrollTargetStoryUUID={readerScrollTargetStoryUUID}
+              scrollTargetRevision={readerScrollTargetRevision}
               stories={stories}
               availableTags={tags}
               activeLang={apiLanguage}

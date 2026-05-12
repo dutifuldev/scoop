@@ -37,6 +37,7 @@ interface StoryReaderPanelProps {
   selectedStoryUUID: string;
   selectedItemUUID: string;
   scrollTargetStoryUUID: string;
+  scrollTargetRevision: number;
   stories: StoryListItem[];
   availableTags: Tag[];
   activeLang: string;
@@ -146,6 +147,7 @@ export function StoryReaderPanel({
   selectedStoryUUID,
   selectedItemUUID,
   scrollTargetStoryUUID,
+  scrollTargetRevision,
   stories,
   availableTags,
   activeLang,
@@ -172,6 +174,7 @@ export function StoryReaderPanel({
   const restoreActiveStoryUUIDRef = useRef("");
   const restoreVisibleCountRef = useRef(0);
   const restoredStateKeyRef = useRef("");
+  const handledScrollTargetRevisionRef = useRef(0);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
 
@@ -256,6 +259,29 @@ export function StoryReaderPanel({
       return selectedStoryInLoadedStories ? "" : selectedStoryUUID;
     });
   }, [selectedStoryInLoadedStories, selectedStoryUUID]);
+
+  useEffect(() => {
+    if (
+      scrollTargetRevision <= 0 ||
+      handledScrollTargetRevisionRef.current === scrollTargetRevision
+    ) {
+      return;
+    }
+    handledScrollTargetRevisionRef.current = scrollTargetRevision;
+
+    if (!scrollTargetStoryUUID || scrollTargetStoryUUID !== selectedStoryUUID) {
+      return;
+    }
+
+    if (selectedStoryInLoadedStories) {
+      setPinnedStoryUUID("");
+    }
+  }, [
+    scrollTargetRevision,
+    scrollTargetStoryUUID,
+    selectedStoryInLoadedStories,
+    selectedStoryUUID,
+  ]);
 
   const computeActiveStory = useCallback(() => {
     const root = contentRef.current;

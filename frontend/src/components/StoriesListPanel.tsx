@@ -68,6 +68,7 @@ export function StoriesListPanel({
 }: StoriesListPanelProps): JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const loadTriggerRef = useRef<HTMLDivElement | null>(null);
+  const storyCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const showTimestampInFeed = searchInput.trim() !== "";
   const translatingStoryUUIDSet = new Set(translatingStoryUUIDs);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -99,6 +100,29 @@ export function StoriesListPanel({
     observer.observe(target);
     return () => observer.disconnect();
   }, [error, hasNextPage, isFetchingNextPage, isLoading, onLoadNextPage, stories.length]);
+
+  useEffect(() => {
+    if (!selectedStoryUUID) {
+      return;
+    }
+
+    const list = listRef.current;
+    const card = storyCardRefs.current[selectedStoryUUID];
+    if (!list || !card) {
+      return;
+    }
+
+    const listRect = list.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const topPadding = 20;
+    const bottomPadding = 36;
+    const isAbove = cardRect.top < listRect.top + topPadding;
+    const isBelow = cardRect.bottom > listRect.bottom - bottomPadding;
+
+    if (isAbove || isBelow) {
+      card.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    }
+  }, [selectedStoryUUID, stories.length]);
 
   return (
     <section className="panel card story-feed-panel">
@@ -247,6 +271,9 @@ export function StoriesListPanel({
                 return (
                   <article
                     key={story.story_uuid}
+                    ref={(node) => {
+                      storyCardRefs.current[story.story_uuid] = node;
+                    }}
                     className={`story-card ${story.story_uuid === selectedStoryUUID ? "active" : ""}`.trim()}
                     onClick={() => onSelectStory(story.story_uuid)}
                     role="button"

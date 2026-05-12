@@ -1,12 +1,11 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
-import { getCollections, getStoryDays, getStoryDetail, getStories, getTags } from "../api";
+import { getCollections, getStoryDays, getStories, getTags } from "../api";
 import { extractErrorMessage } from "../lib/viewerFormat";
 import type {
   CollectionSummary,
   StoryDayBucket,
-  StoryDetailResponse,
   StoryFilters,
   StoryListItem,
   StoryPagination,
@@ -15,8 +14,6 @@ import type {
 
 interface UseViewerQueriesArgs {
   filters: StoryFilters;
-  selectedStoryUUID: string;
-  language: string;
 }
 
 interface UseViewerQueriesResult {
@@ -24,23 +21,16 @@ interface UseViewerQueriesResult {
   tags: Tag[];
   dayBuckets: StoryDayBucket[];
   stories: StoryListItem[];
-  detail: StoryDetailResponse | null;
   pagination: StoryPagination;
   globalError: string;
   storiesError: string;
-  detailError: string;
   isStoriesPending: boolean;
   isFetchingNextStoriesPage: boolean;
   hasNextStoriesPage: boolean;
   fetchNextStoriesPage: () => void;
-  isDetailPending: boolean;
 }
 
-export function useViewerQueries({
-  filters,
-  selectedStoryUUID,
-  language,
-}: UseViewerQueriesArgs): UseViewerQueriesResult {
+export function useViewerQueries({ filters }: UseViewerQueriesArgs): UseViewerQueriesResult {
   const collectionsQuery = useQuery<{ items: CollectionSummary[] }>({
     queryKey: ["collections"],
     queryFn: () => getCollections(),
@@ -79,18 +69,11 @@ export function useViewerQueries({
     },
   });
 
-  const detailQuery = useQuery<StoryDetailResponse>({
-    queryKey: ["story-detail", selectedStoryUUID, language],
-    queryFn: () => getStoryDetail(selectedStoryUUID, language),
-    enabled: selectedStoryUUID !== "",
-  });
-
   const collections = collectionsQuery.data?.items ?? [];
   const tags = tagsQuery.data?.items ?? [];
   const dayBuckets = dayBucketsQuery.data?.items ?? [];
   const storyPages = storiesQuery.data?.pages ?? [];
   const stories = useMemo(() => storyPages.flatMap((page) => page.items), [storyPages]);
-  const detail = detailQuery.data ?? null;
 
   const pagination = useMemo((): StoryPagination => {
     const firstPage = storyPages[0]?.pagination;
@@ -119,22 +102,18 @@ export function useViewerQueries({
   }, [collectionsQuery.error, dayBucketsQuery.error, tagsQuery.error]);
 
   const storiesError = storiesQuery.error ? extractErrorMessage(storiesQuery.error) : "";
-  const detailError = detailQuery.error ? extractErrorMessage(detailQuery.error) : "";
 
   return {
     collections,
     tags,
     dayBuckets,
     stories,
-    detail,
     pagination,
     globalError,
     storiesError,
-    detailError,
     isStoriesPending: storiesQuery.isPending && stories.length === 0,
     isFetchingNextStoriesPage: storiesQuery.isFetchingNextPage,
     hasNextStoriesPage: Boolean(storiesQuery.hasNextPage),
     fetchNextStoriesPage,
-    isDetailPending: detailQuery.isPending,
   };
 }

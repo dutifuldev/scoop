@@ -107,6 +107,31 @@ type ArticleTag struct {
 
 func (ArticleTag) TableName() string { return "news.article_tags" }
 
+// PersonIdentity maps news.person_identities.
+type PersonIdentity struct {
+	PersonIdentityID   int64      `gorm:"column:person_identity_id;primaryKey;autoIncrement"`
+	PersonIdentityUUID string     `gorm:"column:person_identity_uuid;type:uuid;not null;default:gen_random_uuid();unique"`
+	Provider           string     `gorm:"column:provider;type:text;not null"`
+	ProviderUserID     *string    `gorm:"column:provider_user_id;type:text"`
+	Handle             *string    `gorm:"column:handle;type:text"`
+	IdentityRef        string     `gorm:"column:identity_ref;type:text;not null;unique"`
+	ArchivedAt         *time.Time `gorm:"column:archived_at;type:timestamptz"`
+	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;type:timestamptz;not null;default:now()"`
+}
+
+func (PersonIdentity) TableName() string { return "news.person_identities" }
+
+// ArticlePersonIdentity maps news.article_person_identities.
+type ArticlePersonIdentity struct {
+	ArticleID        int64     `gorm:"column:article_id;type:bigint;primaryKey"`
+	PersonIdentityID int64     `gorm:"column:person_identity_id;type:bigint;primaryKey"`
+	CreatedByUserID  *int64    `gorm:"column:created_by_user_id;type:bigint"`
+	CreatedAt        time.Time `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+}
+
+func (ArticlePersonIdentity) TableName() string { return "news.article_person_identities" }
+
 // ArticleEmbedding maps news.article_embeddings.
 type ArticleEmbedding struct {
 	ArticleEmbeddingID   int64     `gorm:"column:article_embedding_id;primaryKey;autoIncrement"`
@@ -360,6 +385,8 @@ func autoMigrateModels() []any {
 		&Article{},
 		&Tag{},
 		&ArticleTag{},
+		&PersonIdentity{},
+		&ArticlePersonIdentity{},
 		&ArticleEmbedding{},
 		&Story{},
 		&StoryArticle{},

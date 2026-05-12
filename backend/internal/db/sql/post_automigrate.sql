@@ -18,6 +18,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_uuid
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_slug
 	ON news.tags (slug);
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_person_identities_uuid
+	ON news.person_identities (person_identity_uuid);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_person_identities_identity_ref
+	ON news.person_identities (identity_ref);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_person_identities_provider_user_id
+	ON news.person_identities (provider, provider_user_id)
+	WHERE provider_user_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_person_identities_provider_handle_without_id
+	ON news.person_identities (provider, handle)
+	WHERE provider_user_id IS NULL AND handle IS NOT NULL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_article_embeddings_uuid
 	ON news.article_embeddings (article_embedding_uuid);
 
@@ -65,6 +79,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_articles_raw_arrival_id
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_article_tags_article_tag
 	ON news.article_tags (article_id, tag_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_article_person_identities_article_identity
+	ON news.article_person_identities (article_id, person_identity_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_article_embeddings_article_model
 	ON news.article_embeddings (article_id, model_name, model_version);
@@ -156,6 +173,12 @@ CREATE INDEX IF NOT EXISTS idx_articles_collection_created_at_not_deleted
 
 CREATE INDEX IF NOT EXISTS idx_article_tags_tag_article
 	ON news.article_tags (tag_id, article_id);
+
+CREATE INDEX IF NOT EXISTS idx_article_person_identities_identity_article
+	ON news.article_person_identities (person_identity_id, article_id);
+
+CREATE INDEX IF NOT EXISTS idx_person_identities_lookup
+	ON news.person_identities (provider, handle, provider_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_tags_archived_slug
 	ON news.tags (archived_at, slug);
@@ -337,6 +360,39 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_actor_created
 
 DO $$
 BEGIN
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'person_identities_provider_check'
+			AND conrelid = 'news.person_identities'::regclass
+	) THEN
+		ALTER TABLE news.person_identities
+			ADD CONSTRAINT person_identities_provider_check
+			CHECK (provider ~ '^[a-z][a-z0-9-]*$');
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'person_identities_identity_value_check'
+			AND conrelid = 'news.person_identities'::regclass
+	) THEN
+		ALTER TABLE news.person_identities
+			ADD CONSTRAINT person_identities_identity_value_check
+			CHECK (provider_user_id IS NOT NULL OR handle IS NOT NULL);
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'person_identities_identity_ref_check'
+			AND conrelid = 'news.person_identities'::regclass
+	) THEN
+		ALTER TABLE news.person_identities
+			ADD CONSTRAINT person_identities_identity_ref_check
+			CHECK (identity_ref ~ '^id://');
+	END IF;
+
 	IF NOT EXISTS (
 		SELECT 1
 		FROM pg_constraint
@@ -1095,6 +1151,45 @@ BEGIN
 	) THEN
 		ALTER TABLE news.article_tags
 			ADD CONSTRAINT article_tags_created_by_user_id_fkey
+			FOREIGN KEY (created_by_user_id)
+			REFERENCES news.users(user_id)
+			ON DELETE SET NULL;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_person_identities_article_id_fkey'
+			AND conrelid = 'news.article_person_identities'::regclass
+	) THEN
+		ALTER TABLE news.article_person_identities
+			ADD CONSTRAINT article_person_identities_article_id_fkey
+			FOREIGN KEY (article_id)
+			REFERENCES news.articles(article_id)
+			ON DELETE CASCADE;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_person_identities_person_identity_id_fkey'
+			AND conrelid = 'news.article_person_identities'::regclass
+	) THEN
+		ALTER TABLE news.article_person_identities
+			ADD CONSTRAINT article_person_identities_person_identity_id_fkey
+			FOREIGN KEY (person_identity_id)
+			REFERENCES news.person_identities(person_identity_id)
+			ON DELETE RESTRICT;
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conname = 'article_person_identities_created_by_user_id_fkey'
+			AND conrelid = 'news.article_person_identities'::regclass
+	) THEN
+		ALTER TABLE news.article_person_identities
+			ADD CONSTRAINT article_person_identities_created_by_user_id_fkey
 			FOREIGN KEY (created_by_user_id)
 			REFERENCES news.users(user_id)
 			ON DELETE SET NULL;

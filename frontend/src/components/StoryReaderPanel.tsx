@@ -1,7 +1,14 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefCallback } from "react";
 
-import { addArticleTag, getStoryDetail, removeArticleTag, requestTranslation } from "../api";
+import {
+  addArticlePersonIdentity,
+  addArticleTag,
+  getStoryDetail,
+  removeArticlePersonIdentity,
+  removeArticleTag,
+  requestTranslation,
+} from "../api";
 import { useStoryArticlePreviews } from "../hooks/useStoryArticlePreviews";
 import {
   defaultCollectionTranslationMode,
@@ -9,6 +16,7 @@ import {
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, StoryListItem, Tag } from "../types";
 import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
+import { ArticlePersonIdentityEditor } from "./story-detail/ArticlePersonIdentityEditor";
 import {
   buildMemberGroups,
   StoryArticleGroup,
@@ -665,6 +673,8 @@ function StoryReaderSection({
   const [translationError, setTranslationError] = useState("");
   const [tagMutationKey, setTagMutationKey] = useState("");
   const [tagMutationError, setTagMutationError] = useState("");
+  const [personMutationKey, setPersonMutationKey] = useState("");
+  const [personMutationError, setPersonMutationError] = useState("");
   const translationRequestedRef = useRef("");
   const activeTranslationKeyRef = useRef("");
   const { itemPreviewByUUID, itemPreviewLoadingByUUID, itemPreviewErrorByUUID } =
@@ -827,6 +837,49 @@ function StoryReaderSection({
     }
   }
 
+  async function onAddArticlePersonIdentity(
+    articleUUID: string,
+    identityRef: string,
+  ): Promise<void> {
+    if (!articleUUID || !identityRef.trim()) {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${identityRef}:add`;
+    setPersonMutationKey(mutationKey);
+    setPersonMutationError("");
+    try {
+      await addArticlePersonIdentity(articleUUID, identityRef.trim());
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setPersonMutationError(err instanceof Error ? err.message : "Failed to add person.");
+      throw err;
+    } finally {
+      setPersonMutationKey("");
+    }
+  }
+
+  async function onRemoveArticlePersonIdentity(
+    articleUUID: string,
+    identityRefOrUUID: string,
+  ): Promise<void> {
+    if (!articleUUID || !identityRefOrUUID.trim()) {
+      return;
+    }
+
+    const mutationKey = `${articleUUID}:${identityRefOrUUID}:remove`;
+    setPersonMutationKey(mutationKey);
+    setPersonMutationError("");
+    try {
+      await removeArticlePersonIdentity(articleUUID, identityRefOrUUID.trim());
+      await refreshTagsAfterMutation();
+    } catch (err) {
+      setPersonMutationError(err instanceof Error ? err.message : "Failed to remove person.");
+    } finally {
+      setPersonMutationKey("");
+    }
+  }
+
   const originalTitle = (detail?.story.original_title || detail?.story.title || "").trim();
   const translatedTitle = (detail?.story.translated_title || "").trim();
   const showTranslatedTitle = sectionActiveLang !== "" && translatedTitle !== "";
@@ -862,6 +915,16 @@ function StoryReaderSection({
                   />
                 </h2>
                 {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
+                {singleRepresentative ? (
+                  <ArticlePersonIdentityEditor
+                    articleUUID={singleRepresentative.article_uuid}
+                    identities={singleRepresentative.person_identities ?? []}
+                    mutationKey={personMutationKey}
+                    variant="title"
+                    onAddIdentity={onAddArticlePersonIdentity}
+                    onRemoveIdentity={onRemoveArticlePersonIdentity}
+                  />
+                ) : null}
                 {singleRepresentative ? (
                   <ArticleTagEditor
                     articleUUID={singleRepresentative.article_uuid}
@@ -915,6 +978,7 @@ function StoryReaderSection({
           ) : null}
           {translationError ? <p className="banner-error">{translationError}</p> : null}
           {tagMutationError ? <p className="banner-error">{tagMutationError}</p> : null}
+          {personMutationError ? <p className="banner-error">{personMutationError}</p> : null}
 
           <section className="member-grid">
             {memberGroups.length === 0 ? (
@@ -932,6 +996,7 @@ function StoryReaderSection({
                 activeLang={sectionActiveLang}
                 availableTags={availableTags}
                 tagMutationKey={tagMutationKey}
+                personMutationKey={personMutationKey}
                 itemPreviewByUUID={itemPreviewByUUID}
                 itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
                 itemPreviewErrorByUUID={itemPreviewErrorByUUID}
@@ -943,6 +1008,8 @@ function StoryReaderSection({
                 onClearSelectedItem={() => onClearSelectedItem(storyUUID, detail.story.collection)}
                 onAddArticleTag={onAddArticleTag}
                 onRemoveArticleTag={onRemoveArticleTag}
+                onAddArticlePersonIdentity={onAddArticlePersonIdentity}
+                onRemoveArticlePersonIdentity={onRemoveArticlePersonIdentity}
               />
             ))}
           </section>

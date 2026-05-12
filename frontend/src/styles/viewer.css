@@ -627,6 +627,10 @@
     @apply min-h-[14px] px-1 py-0 text-[0.58rem];
   }
 
+  .person-chip-small {
+    @apply min-h-[14px] gap-0.5 px-1 py-0 text-[0.58rem];
+  }
+
   .tag-chip-removable {
     @apply pl-2;
   }
@@ -641,6 +645,73 @@
 
   .title-tag-remove {
     @apply h-4 w-4;
+  }
+
+  .person-identity-tools {
+    @apply mt-2;
+  }
+
+  .person-identity-tools-title {
+    @apply mt-0 flex min-w-fit max-w-full flex-col items-start gap-1;
+  }
+
+  .person-identity-row {
+    @apply flex min-h-7 flex-wrap items-center gap-1.5;
+  }
+
+  .person-identity-row-title {
+    min-height: var(--title-action-size, 1.35rem);
+    gap: var(--title-action-gap, 0.375rem);
+    @apply justify-start;
+  }
+
+  .person-chip {
+    --tag-color: #71767b;
+    @apply inline-flex min-h-5 items-center gap-1 rounded-full border px-1.5 py-[1px] font-mono text-[0.66rem] font-semibold leading-none;
+    border-color: color-mix(in srgb, var(--tag-color) 42%, transparent);
+    background: color-mix(in srgb, var(--tag-color) 12%, transparent);
+    color: color-mix(in srgb, var(--tag-color) 80%, white);
+  }
+
+  .title-person-chip {
+    min-height: var(--title-action-size, 1.35rem);
+    @apply px-1.5 py-0;
+  }
+
+  .person-chip-icon {
+    @apply h-3 w-3 opacity-75;
+  }
+
+  .person-chip-provider {
+    @apply uppercase text-panel-400;
+  }
+
+  .person-chip-remove {
+    @apply -mr-0.5 inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  .person-chip-remove-icon {
+    @apply h-3 w-3;
+  }
+
+  .title-person-remove {
+    @apply h-4 w-4;
+  }
+
+  .person-identity-input-shell-title {
+    @apply w-[min(320px,72vw)] flex-nowrap justify-start;
+  }
+
+  .person-identity-input-wrap {
+    @apply relative min-w-[180px] flex-1;
+  }
+
+  .person-identity-input {
+    @apply min-w-[180px];
+  }
+
+  .story-person-row {
+    @apply mt-2 flex flex-wrap gap-1;
   }
 
   .member-decision-inline {

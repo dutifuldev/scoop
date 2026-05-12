@@ -32,6 +32,18 @@ export interface Tag {
   updated_at: string;
 }
 
+export interface PersonIdentity {
+  person_identity_id: number;
+  person_identity_uuid: string;
+  provider: string;
+  provider_user_id?: string | null;
+  handle?: string | null;
+  identity_ref: string;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StoryListItem {
   story_id: number;
   story_uuid: string;
@@ -49,6 +61,7 @@ export interface StoryListItem {
   article_count: number;
   representative?: StoryRepresentative;
   tags?: Tag[];
+  person_identities?: PersonIdentity[];
 }
 
 export interface StoryArticle {
@@ -79,6 +92,7 @@ export interface StoryArticle {
   dedup_date_consistency?: number;
   dedup_composite_score?: number;
   tags?: Tag[];
+  person_identities?: PersonIdentity[];
 }
 
 export interface StoryDetailResponse {

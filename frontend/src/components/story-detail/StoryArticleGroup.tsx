@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
+import { ArticlePersonIdentityEditor } from "./ArticlePersonIdentityEditor";
 import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
 import { TitleActions, TitleSourceLink } from "./TitleActions";
 
@@ -43,6 +44,7 @@ interface StoryArticleGroupProps {
   activeLang: string;
   availableTags: Tag[];
   tagMutationKey: string;
+  personMutationKey: string;
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
@@ -52,6 +54,8 @@ interface StoryArticleGroupProps {
   onClearSelectedItem: () => void;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
+  onAddArticlePersonIdentity: (articleUUID: string, identityRef: string) => Promise<void>;
+  onRemoveArticlePersonIdentity: (articleUUID: string, identityRefOrUUID: string) => Promise<void>;
 }
 
 export function StoryArticleGroup({
@@ -64,6 +68,7 @@ export function StoryArticleGroup({
   activeLang,
   availableTags,
   tagMutationKey,
+  personMutationKey,
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
@@ -73,6 +78,8 @@ export function StoryArticleGroup({
   onClearSelectedItem,
   onAddArticleTag,
   onRemoveArticleTag,
+  onAddArticlePersonIdentity,
+  onRemoveArticlePersonIdentity,
 }: StoryArticleGroupProps): JSX.Element {
   const representative = group.representative;
   const isExpanded = !isMergedStory || expandedGroupKeys.includes(group.key);
@@ -174,6 +181,16 @@ export function StoryArticleGroup({
               </button>
               {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
               {showPrimaryTagEditor ? (
+                <ArticlePersonIdentityEditor
+                  articleUUID={representative.article_uuid}
+                  identities={representative.person_identities ?? []}
+                  mutationKey={personMutationKey}
+                  variant="title"
+                  onAddIdentity={onAddArticlePersonIdentity}
+                  onRemoveIdentity={onRemoveArticlePersonIdentity}
+                />
+              ) : null}
+              {showPrimaryTagEditor ? (
                 <ArticleTagEditor
                   articleUUID={representative.article_uuid}
                   currentTags={representative.tags ?? []}
@@ -209,14 +226,23 @@ export function StoryArticleGroup({
         </p>
       )}
       {!isMergedStory && showPrimaryTagEditor ? (
-        <ArticleTagEditor
-          articleUUID={representative.article_uuid}
-          currentTags={representative.tags ?? []}
-          availableTags={availableTags}
-          mutationKey={tagMutationKey}
-          onAddTag={onAddArticleTag}
-          onRemoveTag={onRemoveArticleTag}
-        />
+        <>
+          <ArticlePersonIdentityEditor
+            articleUUID={representative.article_uuid}
+            identities={representative.person_identities ?? []}
+            mutationKey={personMutationKey}
+            onAddIdentity={onAddArticlePersonIdentity}
+            onRemoveIdentity={onRemoveArticlePersonIdentity}
+          />
+          <ArticleTagEditor
+            articleUUID={representative.article_uuid}
+            currentTags={representative.tags ?? []}
+            availableTags={availableTags}
+            mutationKey={tagMutationKey}
+            onAddTag={onAddArticleTag}
+            onRemoveTag={onRemoveArticleTag}
+          />
+        </>
       ) : null}
       {isExpanded ? (
         <>
@@ -302,6 +328,13 @@ export function StoryArticleGroup({
                         mutationKey={tagMutationKey}
                         onAddTag={onAddArticleTag}
                         onRemoveTag={onRemoveArticleTag}
+                      />
+                      <ArticlePersonIdentityEditor
+                        articleUUID={groupMember.article_uuid}
+                        identities={groupMember.person_identities ?? []}
+                        mutationKey={personMutationKey}
+                        onAddIdentity={onAddArticlePersonIdentity}
+                        onRemoveIdentity={onRemoveArticlePersonIdentity}
                       />
                     </li>
                   );

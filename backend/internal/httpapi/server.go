@@ -69,52 +69,54 @@ type storyRepresentative struct {
 }
 
 type storyListItem struct {
-	StoryID          int64                `json:"story_id"`
-	StoryUUID        string               `json:"story_uuid"`
-	Collection       string               `json:"collection"`
-	TranslationMode  string               `json:"translation_mode"`
-	Title            string               `json:"title"`
-	OriginalTitle    string               `json:"original_title"`
-	TranslatedTitle  *string              `json:"translated_title"`
-	DetectedLanguage string               `json:"detected_language"`
-	CanonicalURL     *string              `json:"canonical_url,omitempty"`
-	Status           string               `json:"status"`
-	FirstSeenAt      time.Time            `json:"first_seen_at"`
-	LastSeenAt       time.Time            `json:"last_seen_at"`
-	SourceCount      int                  `json:"source_count"`
-	ArticleCount     int                  `json:"article_count"`
-	Representative   *storyRepresentative `json:"representative,omitempty"`
-	Tags             []db.TagRecord       `json:"tags,omitempty"`
+	StoryID          int64                     `json:"story_id"`
+	StoryUUID        string                    `json:"story_uuid"`
+	Collection       string                    `json:"collection"`
+	TranslationMode  string                    `json:"translation_mode"`
+	Title            string                    `json:"title"`
+	OriginalTitle    string                    `json:"original_title"`
+	TranslatedTitle  *string                   `json:"translated_title"`
+	DetectedLanguage string                    `json:"detected_language"`
+	CanonicalURL     *string                   `json:"canonical_url,omitempty"`
+	Status           string                    `json:"status"`
+	FirstSeenAt      time.Time                 `json:"first_seen_at"`
+	LastSeenAt       time.Time                 `json:"last_seen_at"`
+	SourceCount      int                       `json:"source_count"`
+	ArticleCount     int                       `json:"article_count"`
+	Representative   *storyRepresentative      `json:"representative,omitempty"`
+	Tags             []db.TagRecord            `json:"tags,omitempty"`
+	PersonIdentities []db.PersonIdentityRecord `json:"person_identities,omitempty"`
 }
 
 type StoryArticle struct {
-	StoryArticleUUID     string         `json:"story_article_uuid"`
-	ArticleUUID          string         `json:"article_uuid"`
-	Source               string         `json:"source"`
-	SourceItemID         string         `json:"source_item_id"`
-	Collection           string         `json:"collection"`
-	TranslationMode      string         `json:"translation_mode"`
-	CanonicalURL         *string        `json:"canonical_url,omitempty"`
-	PublishedAt          *time.Time     `json:"published_at,omitempty"`
-	NormalizedTitle      string         `json:"normalized_title"`
-	NormalizedText       string         `json:"normalized_text,omitempty"`
-	DetectedLanguage     string         `json:"detected_language"`
-	OriginalTitle        string         `json:"original_title"`
-	TranslatedTitle      *string        `json:"translated_title"`
-	OriginalText         string         `json:"original_text"`
-	TranslatedText       *string        `json:"translated_text"`
-	SourceDomain         *string        `json:"source_domain,omitempty"`
-	MatchedAt            time.Time      `json:"matched_at"`
-	MatchType            string         `json:"match_type"`
-	MatchScore           *float64       `json:"match_score,omitempty"`
-	MatchDetails         map[string]any `json:"match_details,omitempty"`
-	DedupDecision        *string        `json:"dedup_decision,omitempty"`
-	DedupExactSignal     *string        `json:"dedup_exact_signal,omitempty"`
-	DedupBestCosine      *float64       `json:"dedup_best_cosine,omitempty"`
-	DedupTitleOverlap    *float64       `json:"dedup_title_overlap,omitempty"`
-	DedupDateConsistency *float64       `json:"dedup_date_consistency,omitempty"`
-	DedupCompositeScore  *float64       `json:"dedup_composite_score,omitempty"`
-	Tags                 []db.TagRecord `json:"tags,omitempty"`
+	StoryArticleUUID     string                    `json:"story_article_uuid"`
+	ArticleUUID          string                    `json:"article_uuid"`
+	Source               string                    `json:"source"`
+	SourceItemID         string                    `json:"source_item_id"`
+	Collection           string                    `json:"collection"`
+	TranslationMode      string                    `json:"translation_mode"`
+	CanonicalURL         *string                   `json:"canonical_url,omitempty"`
+	PublishedAt          *time.Time                `json:"published_at,omitempty"`
+	NormalizedTitle      string                    `json:"normalized_title"`
+	NormalizedText       string                    `json:"normalized_text,omitempty"`
+	DetectedLanguage     string                    `json:"detected_language"`
+	OriginalTitle        string                    `json:"original_title"`
+	TranslatedTitle      *string                   `json:"translated_title"`
+	OriginalText         string                    `json:"original_text"`
+	TranslatedText       *string                   `json:"translated_text"`
+	SourceDomain         *string                   `json:"source_domain,omitempty"`
+	MatchedAt            time.Time                 `json:"matched_at"`
+	MatchType            string                    `json:"match_type"`
+	MatchScore           *float64                  `json:"match_score,omitempty"`
+	MatchDetails         map[string]any            `json:"match_details,omitempty"`
+	DedupDecision        *string                   `json:"dedup_decision,omitempty"`
+	DedupExactSignal     *string                   `json:"dedup_exact_signal,omitempty"`
+	DedupBestCosine      *float64                  `json:"dedup_best_cosine,omitempty"`
+	DedupTitleOverlap    *float64                  `json:"dedup_title_overlap,omitempty"`
+	DedupDateConsistency *float64                  `json:"dedup_date_consistency,omitempty"`
+	DedupCompositeScore  *float64                  `json:"dedup_composite_score,omitempty"`
+	Tags                 []db.TagRecord            `json:"tags,omitempty"`
+	PersonIdentities     []db.PersonIdentityRecord `json:"person_identities,omitempty"`
 }
 
 type storyDetail struct {
@@ -348,6 +350,7 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.PUT("/me/settings", s.handlePutMySettings)
 	protected.GET("/stats", s.handleStats)
 	protected.GET("/tags", s.handleTags)
+	protected.GET("/person-identities", s.handlePersonIdentities)
 	protected.GET("/collections", s.handleCollections)
 	protected.PATCH("/collections/:collection/settings", s.handleUpdateCollectionSettings)
 	protected.GET("/story-days", s.handleStoryDays)
@@ -363,6 +366,9 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.POST("/articles/:article_uuid/restore", s.handleRestoreArticle)
 	protected.POST("/articles/:article_uuid/tags", s.handleAddArticleTag)
 	protected.DELETE("/articles/:article_uuid/tags/:tag", s.handleRemoveArticleTag)
+	protected.GET("/articles/:article_uuid/person-identities", s.handleArticlePersonIdentities)
+	protected.POST("/articles/:article_uuid/person-identities", s.handleAddArticlePersonIdentity)
+	protected.DELETE("/articles/:article_uuid/person-identities/:person_identity", s.handleRemoveArticlePersonIdentity)
 	protected.GET("/articles/:story_article_uuid/preview", s.handleStoryArticlePreview)
 
 	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
@@ -1069,8 +1075,13 @@ OFFSET $9
 	if err != nil {
 		return 0, nil, err
 	}
+	personIdentitiesByStoryID, err := s.pool.ListPersonIdentitiesForStoryIDs(ctx, storyIDs)
+	if err != nil {
+		return 0, nil, err
+	}
 	for idx := range items {
 		items[idx].Tags = tagsByStoryID[items[idx].StoryID]
+		items[idx].PersonIdentities = personIdentitiesByStoryID[items[idx].StoryID]
 	}
 
 	return total, items, nil
@@ -1404,9 +1415,20 @@ ORDER BY sm.matched_at DESC
 	if err != nil {
 		return nil, err
 	}
+	personIdentitiesByArticleUUID, err := s.pool.ListPersonIdentitiesForArticleUUIDs(ctx, articleUUIDs)
+	if err != nil {
+		return nil, err
+	}
 	for idx := range members {
 		members[idx].Tags = tagsByArticleUUID[members[idx].ArticleUUID]
+		members[idx].PersonIdentities = personIdentitiesByArticleUUID[members[idx].ArticleUUID]
 	}
+
+	personIdentitiesByStoryID, err := s.pool.ListPersonIdentitiesForStoryIDs(ctx, []int64{story.StoryID})
+	if err != nil {
+		return nil, err
+	}
+	story.PersonIdentities = personIdentitiesByStoryID[story.StoryID]
 
 	return &storyDetail{
 		Story:   story,

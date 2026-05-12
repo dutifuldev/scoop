@@ -37,6 +37,8 @@ func Run(args []string) int {
 		return runArticles(args[1:])
 	case "tags":
 		return runTags(args[1:])
+	case "person-identities":
+		return runPersonIdentities(args[1:])
 	case "digest":
 		return runDigest(args[1:])
 	case "health":
@@ -83,6 +85,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  search     Search story titles")
 	fmt.Fprintln(os.Stderr, "  articles   List normalized articles")
 	fmt.Fprintln(os.Stderr, "  tags       Manage allowed article tags and article tag assignments")
+	fmt.Fprintln(os.Stderr, "  person-identities  Manage external person identities")
 	fmt.Fprintln(os.Stderr, "  digest     Build today/yesterday digest story sets")
 	fmt.Fprintln(os.Stderr, "  health     Verify database connectivity")
 	fmt.Fprintln(os.Stderr, "  ingest     Insert one article into ingest ledger tables")

@@ -516,6 +516,10 @@
     @apply min-h-[14px] px-1 py-0 text-[0.58rem];
   }
 
+  .tag-chip-removable {
+    @apply pl-1.5;
+  }
+
   .tag-chip-remove {
     @apply inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
   }

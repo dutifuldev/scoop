@@ -94,7 +94,7 @@ export function ArticleTagEditor({
   const renderedCurrentTags = currentTags.map((tag) => {
     const removeMutationKey = `${articleUUID}:${tag.tag}:remove`;
     return (
-      <span key={tag.tag} className="tag-chip" style={tagChipStyle(tag)}>
+      <span key={tag.tag} className="tag-chip tag-chip-removable" style={tagChipStyle(tag)}>
         {tag.tag}
         <button
           type="button"

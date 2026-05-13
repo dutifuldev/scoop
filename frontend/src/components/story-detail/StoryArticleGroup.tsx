@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
+import { ArticleByline } from "./ArticleByline";
 import { ArticlePersonIdentityEditor } from "./ArticlePersonIdentityEditor";
 import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
 import { TitleActions, TitleSourceLink } from "./TitleActions";
@@ -138,6 +139,46 @@ export function StoryArticleGroup({
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
   const routeItemUUID = hasSelectedMember ? selectedItemUUID : representative.story_article_uuid;
+  const renderedArticleContent = (
+    <article
+      className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
+    >
+      {isPreviewLoading && !hasOriginalContent ? (
+        <p className="muted">Fetching reader preview...</p>
+      ) : null}
+      {!isPreviewLoading && !hasOriginalContent && !hasTranslatedContent ? (
+        <p className="muted">No content captured for this item.</p>
+      ) : null}
+
+      {showTextModeToggle ? (
+        <p className="detail-item-content-mode-hint">
+          Showing {detailTextMode === "translated" ? "translated first" : "original first"}.
+        </p>
+      ) : null}
+
+      <div className="detail-item-content-body">
+        {orderedBlocks.map((block) =>
+          block.paragraphs.length > 0 ? (
+            <section
+              key={`${group.key}-${block.key}`}
+              className={`detail-text-block detail-text-block-${block.key} ${!isMergedStory ? "detail-text-block-single" : ""}`.trim()}
+            >
+              {showTextBlockLabels ? <p className="detail-text-label">{block.label}</p> : null}
+              {block.paragraphs.map((paragraph, index) =>
+                renderTextBlock(paragraph, `${group.key}-${block.key}-paragraph-${index}`),
+              )}
+            </section>
+          ) : null,
+        )}
+      </div>
+
+      {!isPreviewLoading && previewError && previewTexts.length === 0 && hasOriginalContent ? (
+        <p className="muted">
+          Reader preview unavailable. Showing captured content when available.
+        </p>
+      ) : null}
+    </article>
+  );
 
   return (
     <article
@@ -204,8 +245,7 @@ export function StoryArticleGroup({
             </TitleActions>
           </div>
           <p className="member-sub">
-            matched {formatDateTime(representative.matched_at)} • published{" "}
-            {formatDateTime(representative.published_at)}
+            matched {formatDateTime(representative.matched_at)}
             {decisionText ? (
               <>
                 {" "}
@@ -220,11 +260,7 @@ export function StoryArticleGroup({
             ) : null}
           </p>
         </>
-      ) : (
-        <p className="member-sub member-sub-single">
-          published {formatDateTime(representative.published_at)} • {representative.source}
-        </p>
-      )}
+      ) : null}
       {!isMergedStory && showPrimaryTagEditor ? (
         <>
           <ArticlePersonIdentityEditor
@@ -244,51 +280,21 @@ export function StoryArticleGroup({
           />
         </>
       ) : null}
+      <ArticleByline
+        identities={representative.person_identities ?? []}
+        publishedAt={representative.published_at}
+        source={representative.source}
+      >
+        {isExpanded ? (
+          renderedArticleContent
+        ) : (
+          <p className="member-preview member-preview-collapsed">
+            {buildMemberPreview(collapsedPreviewText)}
+          </p>
+        )}
+      </ArticleByline>
       {isExpanded ? (
         <>
-          <article
-            className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
-          >
-            {isPreviewLoading && !hasOriginalContent ? (
-              <p className="muted">Fetching reader preview...</p>
-            ) : null}
-            {!isPreviewLoading && !hasOriginalContent && !hasTranslatedContent ? (
-              <p className="muted">No content captured for this item.</p>
-            ) : null}
-
-            {showTextModeToggle ? (
-              <p className="detail-item-content-mode-hint">
-                Showing {detailTextMode === "translated" ? "translated first" : "original first"}.
-              </p>
-            ) : null}
-
-            <div className="detail-item-content-body">
-              {orderedBlocks.map((block) =>
-                block.paragraphs.length > 0 ? (
-                  <section
-                    key={`${group.key}-${block.key}`}
-                    className={`detail-text-block detail-text-block-${block.key} ${!isMergedStory ? "detail-text-block-single" : ""}`.trim()}
-                  >
-                    {showTextBlockLabels ? (
-                      <p className="detail-text-label">{block.label}</p>
-                    ) : null}
-                    {block.paragraphs.map((paragraph, index) =>
-                      renderTextBlock(paragraph, `${group.key}-${block.key}-paragraph-${index}`),
-                    )}
-                  </section>
-                ) : null,
-              )}
-            </div>
-
-            {!isPreviewLoading &&
-            previewError &&
-            previewTexts.length === 0 &&
-            hasOriginalContent ? (
-              <p className="muted">
-                Reader preview unavailable. Showing captured content when available.
-              </p>
-            ) : null}
-          </article>
           {group.members.length > 1 ? (
             <section className="member-merge-provenance">
               <p className="member-merge-provenance-title">Deduped items</p>
@@ -312,8 +318,7 @@ export function StoryArticleGroup({
                         {buildMemberSubtitle(groupMember)}
                       </button>
                       <p className="member-sub">
-                        matched {formatDateTime(groupMember.matched_at)} • published{" "}
-                        {formatDateTime(groupMember.published_at)}
+                        matched {formatDateTime(groupMember.matched_at)}
                         {memberDecision ? (
                           <>
                             {" "}
@@ -321,6 +326,11 @@ export function StoryArticleGroup({
                           </>
                         ) : null}
                       </p>
+                      <ArticleByline
+                        identities={groupMember.person_identities ?? []}
+                        publishedAt={groupMember.published_at}
+                        source={groupMember.source}
+                      />
                       <ArticleTagEditor
                         articleUUID={groupMember.article_uuid}
                         currentTags={groupMember.tags ?? []}
@@ -343,11 +353,6 @@ export function StoryArticleGroup({
             </section>
           ) : null}
         </>
-      ) : null}
-      {!isExpanded ? (
-        <p className="member-preview member-preview-collapsed">
-          {buildMemberPreview(collapsedPreviewText)}
-        </p>
       ) : null}
     </article>
   );

@@ -45,6 +45,38 @@ export function formatDateTime(value?: string): string {
   return date.toLocaleString("en-US", options);
 }
 
+export function formatBylineDate(value?: string, now = new Date()): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const diffMs = now.getTime() - date.getTime();
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+
+  if (diffMs >= 0 && diffMs < minuteMs) {
+    return "now";
+  }
+  if (diffMs >= 0 && diffMs < hourMs) {
+    return `${Math.max(1, Math.floor(diffMs / minuteMs))}m`;
+  }
+  if (diffMs >= 0 && diffMs < dayMs) {
+    return `${Math.max(1, Math.floor(diffMs / hourMs))}h`;
+  }
+
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
 export function formatCalendarDay(value: string): string {
   const date = parseCalendarDay(value);
   if (!date) {
@@ -165,11 +197,16 @@ export function buildFeedMetaText(story: StoryListItem, includeTimestamp = false
 }
 
 export function buildMemberSubtitle(member: StoryArticle): string {
-  const scoreSuffix = member.match_score == null ? "" : ` • score ${Number(member.match_score).toFixed(3)}`;
+  const scoreSuffix =
+    member.match_score == null ? "" : ` • score ${Number(member.match_score).toFixed(3)}`;
   return `${member.source}:${member.source_item_id} • ${member.match_type}${scoreSuffix}`;
 }
 
-export function buildPagination(page: number, pageSize: number, incoming?: Partial<StoryPagination>): StoryPagination {
+export function buildPagination(
+  page: number,
+  pageSize: number,
+  incoming?: Partial<StoryPagination>,
+): StoryPagination {
   return {
     page: incoming?.page ?? page,
     page_size: incoming?.page_size ?? pageSize,

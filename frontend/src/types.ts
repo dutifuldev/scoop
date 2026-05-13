@@ -38,6 +38,7 @@ export interface PersonIdentity {
   provider: string;
   provider_user_id?: string | null;
   handle?: string | null;
+  display_name?: string | null;
   identity_ref: string;
   archived_at?: string | null;
   created_at: string;

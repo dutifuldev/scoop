@@ -492,6 +492,10 @@
     @apply flex min-w-0 items-start;
   }
 
+  .member-title-row-byline {
+    @apply mt-1;
+  }
+
   .member-title-cluster {
     @apply min-w-0;
   }
@@ -536,31 +540,42 @@
 
   .article-byline {
     @apply mt-2 grid min-w-0 items-start;
-    grid-template-columns: 2rem minmax(0, 1fr);
-    column-gap: 0.7rem;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    column-gap: 0.75rem;
   }
 
   .article-byline-avatar {
-    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.68rem] font-bold text-panel-400;
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
   }
 
   .article-byline-main {
-    @apply min-w-0 pt-[0.18rem];
+    @apply min-w-0 pt-[0.08rem];
   }
 
   .article-byline-content {
     @apply min-w-0;
   }
 
+  .article-byline-title-stack {
+    @apply mb-2 min-w-0;
+  }
+
+  .article-byline-title-stack .member-head {
+    @apply text-[0.92rem] leading-[1.6];
+  }
+
   .article-byline-identity {
-    @apply flex min-w-0 flex-wrap items-center gap-[0.38rem] text-[0.82rem] leading-tight;
+    @apply flex min-w-0 flex-wrap items-center gap-[0.38rem] text-[0.92rem] leading-[1.6] text-panel-100;
   }
 
   .article-byline-name {
-    @apply min-w-0 max-w-full truncate font-semibold text-panel-100;
+    @apply min-w-0 max-w-full truncate font-normal text-panel-100;
   }
 
-  .article-byline-handle,
+  .article-byline-handle {
+    @apply shrink-0 font-semibold text-panel-100;
+  }
+
   .article-byline-dot,
   .article-byline-date {
     @apply shrink-0 text-panel-400;
@@ -673,77 +688,6 @@
 
   .title-tag-remove {
     @apply h-4 w-4;
-  }
-
-  .person-identity-tools {
-    @apply mt-2;
-  }
-
-  .person-identity-tools-title {
-    @apply mt-0 flex min-w-fit max-w-full flex-col items-start gap-1;
-  }
-
-  .person-identity-row {
-    @apply flex min-h-7 flex-wrap items-center gap-1.5;
-  }
-
-  .person-identity-row-title {
-    min-height: var(--title-action-size, 1.35rem);
-    gap: var(--title-action-gap, 0.375rem);
-    @apply justify-start;
-  }
-
-  .person-chip {
-    --tag-color: #71767b;
-    @apply inline-flex min-h-5 items-center gap-1 rounded-full border px-1.5 py-[1px] font-mono text-[0.66rem] font-semibold leading-none;
-    border-color: color-mix(in srgb, var(--tag-color) 42%, transparent);
-    background: color-mix(in srgb, var(--tag-color) 12%, transparent);
-    color: color-mix(in srgb, var(--tag-color) 80%, white);
-  }
-
-  .title-person-chip {
-    min-height: var(--title-action-size, 1.35rem);
-    @apply px-1.5 py-0;
-  }
-
-  .person-chip-icon {
-    @apply h-3 w-3 opacity-75;
-  }
-
-  .person-chip-provider {
-    @apply uppercase text-panel-400;
-  }
-
-  .person-chip-remove {
-    @apply -mr-0.5 inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
-  }
-
-  .person-chip-remove-icon {
-    @apply h-3 w-3;
-  }
-
-  .title-person-remove {
-    @apply h-4 w-4;
-  }
-
-  .person-identity-input-shell-title {
-    @apply w-[min(360px,72vw)] justify-start;
-  }
-
-  .person-identity-input-wrap {
-    @apply relative min-w-[180px] flex-1;
-  }
-
-  .person-identity-input {
-    @apply min-w-[180px];
-  }
-
-  .person-edit-token {
-    @apply inline-flex min-h-5 shrink-0 items-center gap-0.5 rounded-full border border-panel-500 bg-panel-800 px-1.5 py-[1px] font-mono text-[0.66rem] font-semibold leading-none text-panel-400;
-  }
-
-  .person-edit-token-remove {
-    @apply -mr-0.5 inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
   }
 
   .member-decision-inline {
@@ -1087,6 +1031,10 @@
   }
 
   .app-root-viewer .detail-item-content-text {
+    @apply text-[0.94rem] leading-[1.6];
+  }
+
+  .app-root-viewer .article-byline-title-stack .member-head {
     @apply text-[0.94rem] leading-[1.6];
   }
 

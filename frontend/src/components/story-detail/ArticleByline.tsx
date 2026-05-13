@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import discordLogoURL from "../../assets/discord.svg";
 import { formatBylineDate } from "../../lib/viewerFormat";
 import type { PersonIdentity } from "../../types";
-import { personIdentityLabel } from "./ArticlePersonIdentityEditor";
 
 interface ArticleBylineProps {
   identities?: PersonIdentity[];
@@ -63,6 +62,16 @@ function providerIcon(identity: PersonIdentity): JSX.Element | null {
   return (
     <img className="article-byline-provider-icon" src={discordLogoURL} alt="" aria-hidden="true" />
   );
+}
+
+function personIdentityLabel(identity: PersonIdentity): string {
+  if (identity.handle?.trim()) {
+    return `@${identity.handle.trim()}`;
+  }
+  if (identity.provider_user_id?.trim()) {
+    return `${identity.provider}:${identity.provider_user_id.trim()}`;
+  }
+  return identity.provider.trim() || "person";
 }
 
 export function ArticleByline({

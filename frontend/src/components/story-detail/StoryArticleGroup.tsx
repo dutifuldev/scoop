@@ -1,11 +1,10 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
 import { ArticleByline } from "./ArticleByline";
-import { ArticlePersonIdentityEditor } from "./ArticlePersonIdentityEditor";
 import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
 import { TitleActions, TitleSourceLink } from "./TitleActions";
 
@@ -45,7 +44,6 @@ interface StoryArticleGroupProps {
   activeLang: string;
   availableTags: Tag[];
   tagMutationKey: string;
-  personMutationKey: string;
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
@@ -55,8 +53,6 @@ interface StoryArticleGroupProps {
   onClearSelectedItem: () => void;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
-  onAddArticlePersonIdentity: (articleUUID: string, identityRef: string) => Promise<void>;
-  onRemoveArticlePersonIdentity: (articleUUID: string, identityRefOrUUID: string) => Promise<void>;
 }
 
 export function StoryArticleGroup({
@@ -69,7 +65,6 @@ export function StoryArticleGroup({
   activeLang,
   availableTags,
   tagMutationKey,
-  personMutationKey,
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
@@ -79,8 +74,6 @@ export function StoryArticleGroup({
   onClearSelectedItem,
   onAddArticleTag,
   onRemoveArticleTag,
-  onAddArticlePersonIdentity,
-  onRemoveArticlePersonIdentity,
 }: StoryArticleGroupProps): JSX.Element {
   const representative = group.representative;
   const isExpanded = !isMergedStory || expandedGroupKeys.includes(group.key);
@@ -139,6 +132,83 @@ export function StoryArticleGroup({
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
   const routeItemUUID = hasSelectedMember ? selectedItemUUID : representative.story_article_uuid;
+  const hasRepresentativeIdentity = (representative.person_identities ?? []).some(
+    (identity) => !identity.archived_at,
+  );
+  const shouldPlaceTitleInByline = hasRepresentativeIdentity;
+  const renderMemberTitleRow = (className = ""): JSX.Element => (
+    <div className={`member-title-row ${className}`.trim()}>
+      <TitleActions className="member-title-cluster">
+        {isMergedStory ? (
+          <button
+            type="button"
+            className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
+            onClick={() => {
+              if (isExpanded) {
+                onExpandedGroupKeysChange((previous) =>
+                  previous.filter((existingGroupKey) => existingGroupKey !== group.key),
+                );
+                if (hasSelectedMember) {
+                  onClearSelectedItem();
+                }
+                return;
+              }
+
+              onExpandedGroupKeysChange((previous) => {
+                if (previous.includes(group.key)) {
+                  return previous;
+                }
+                return [...previous, group.key];
+              });
+              onSelectItem(routeItemUUID);
+            }}
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${representativeDisplayTitle || "(no title)"}`}
+          >
+            <p className="member-head">{representativeDisplayTitle || "(no title)"}</p>
+            {isExpanded ? (
+              <ChevronDown className="member-toggle-icon" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="member-toggle-icon" aria-hidden="true" />
+            )}
+          </button>
+        ) : (
+          <p className="member-head member-head-static">
+            {representativeDisplayTitle || "(no title)"}
+          </p>
+        )}
+        {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
+        {showPrimaryTagEditor ? (
+          <ArticleTagEditor
+            articleUUID={representative.article_uuid}
+            currentTags={representative.tags ?? []}
+            availableTags={availableTags}
+            mutationKey={tagMutationKey}
+            variant="title"
+            onAddTag={onAddArticleTag}
+            onRemoveTag={onRemoveArticleTag}
+          />
+        ) : null}
+      </TitleActions>
+    </div>
+  );
+  const memberMetadata: ReactNode = (
+    <p className="member-sub">
+      matched {formatDateTime(representative.matched_at)}
+      {decisionText ? (
+        <>
+          {" "}
+          • <span className="member-decision-inline">{decisionText}</span>
+        </>
+      ) : null}
+      {group.members.length > 1 ? (
+        <>
+          {" "}
+          • merged {group.members.length} items from {group.sourceCount} sources
+        </>
+      ) : null}
+    </p>
+  );
   const renderedArticleContent = (
     <article
       className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
@@ -184,100 +254,10 @@ export function StoryArticleGroup({
     <article
       className={`member-card ${isExpanded ? "member-card-expanded" : ""} ${!isMergedStory ? "member-card-single" : ""}`.trim()}
     >
-      {isMergedStory ? (
+      {isMergedStory && !shouldPlaceTitleInByline ? (
         <>
-          <div className="member-title-row">
-            <TitleActions className="member-title-cluster">
-              <button
-                type="button"
-                className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
-                onClick={() => {
-                  if (isExpanded) {
-                    onExpandedGroupKeysChange((previous) =>
-                      previous.filter((existingGroupKey) => existingGroupKey !== group.key),
-                    );
-                    if (hasSelectedMember) {
-                      onClearSelectedItem();
-                    }
-                    return;
-                  }
-
-                  onExpandedGroupKeysChange((previous) => {
-                    if (previous.includes(group.key)) {
-                      return previous;
-                    }
-                    return [...previous, group.key];
-                  });
-                  onSelectItem(routeItemUUID);
-                }}
-                aria-expanded={isExpanded}
-                aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${representativeDisplayTitle || "(no title)"}`}
-              >
-                <p className="member-head">{representativeDisplayTitle || "(no title)"}</p>
-                {isExpanded ? (
-                  <ChevronDown className="member-toggle-icon" aria-hidden="true" />
-                ) : (
-                  <ChevronRight className="member-toggle-icon" aria-hidden="true" />
-                )}
-              </button>
-              {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
-              {showPrimaryTagEditor ? (
-                <ArticlePersonIdentityEditor
-                  articleUUID={representative.article_uuid}
-                  identities={representative.person_identities ?? []}
-                  mutationKey={personMutationKey}
-                  variant="title"
-                  onAddIdentity={onAddArticlePersonIdentity}
-                  onRemoveIdentity={onRemoveArticlePersonIdentity}
-                />
-              ) : null}
-              {showPrimaryTagEditor ? (
-                <ArticleTagEditor
-                  articleUUID={representative.article_uuid}
-                  currentTags={representative.tags ?? []}
-                  availableTags={availableTags}
-                  mutationKey={tagMutationKey}
-                  variant="title"
-                  onAddTag={onAddArticleTag}
-                  onRemoveTag={onRemoveArticleTag}
-                />
-              ) : null}
-            </TitleActions>
-          </div>
-          <p className="member-sub">
-            matched {formatDateTime(representative.matched_at)}
-            {decisionText ? (
-              <>
-                {" "}
-                • <span className="member-decision-inline">{decisionText}</span>
-              </>
-            ) : null}
-            {group.members.length > 1 ? (
-              <>
-                {" "}
-                • merged {group.members.length} items from {group.sourceCount} sources
-              </>
-            ) : null}
-          </p>
-        </>
-      ) : null}
-      {!isMergedStory && showPrimaryTagEditor ? (
-        <>
-          <ArticlePersonIdentityEditor
-            articleUUID={representative.article_uuid}
-            identities={representative.person_identities ?? []}
-            mutationKey={personMutationKey}
-            onAddIdentity={onAddArticlePersonIdentity}
-            onRemoveIdentity={onRemoveArticlePersonIdentity}
-          />
-          <ArticleTagEditor
-            articleUUID={representative.article_uuid}
-            currentTags={representative.tags ?? []}
-            availableTags={availableTags}
-            mutationKey={tagMutationKey}
-            onAddTag={onAddArticleTag}
-            onRemoveTag={onRemoveArticleTag}
-          />
+          {renderMemberTitleRow()}
+          {memberMetadata}
         </>
       ) : null}
       <ArticleByline
@@ -285,6 +265,12 @@ export function StoryArticleGroup({
         publishedAt={representative.published_at}
         source={representative.source}
       >
+        {shouldPlaceTitleInByline ? (
+          <div className="article-byline-title-stack">
+            {renderMemberTitleRow("member-title-row-byline")}
+            {memberMetadata}
+          </div>
+        ) : null}
         {isExpanded ? (
           renderedArticleContent
         ) : (
@@ -338,13 +324,6 @@ export function StoryArticleGroup({
                         mutationKey={tagMutationKey}
                         onAddTag={onAddArticleTag}
                         onRemoveTag={onRemoveArticleTag}
-                      />
-                      <ArticlePersonIdentityEditor
-                        articleUUID={groupMember.article_uuid}
-                        identities={groupMember.person_identities ?? []}
-                        mutationKey={personMutationKey}
-                        onAddIdentity={onAddArticlePersonIdentity}
-                        onRemoveIdentity={onRemoveArticlePersonIdentity}
                       />
                     </li>
                   );

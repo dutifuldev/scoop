@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { ChevronDown, LogOut, Settings2, X } from "lucide-react";
 
-import { tagHighlightStyle } from "../lib/tagHighlight";
 import { buildFeedMetaText, formatCalendarDay, formatCount } from "../lib/viewerFormat";
 import type { StoryListItem, Tag } from "../types";
 import { Button } from "./ui/button";
@@ -268,7 +267,6 @@ export function StoriesListPanel({
                 const showTranslated = activeLang !== "" && translatedTitle !== "";
                 const displayTitle = showTranslated ? translatedTitle : originalTitle;
                 const isTranslatingStory = translatingStoryUUIDSet.has(story.story_uuid);
-                const highlightStyle = tagHighlightStyle(story.tags);
 
                 return (
                   <article
@@ -276,10 +274,9 @@ export function StoriesListPanel({
                     ref={(node) => {
                       storyCardRefs.current[story.story_uuid] = node;
                     }}
-                    className={`story-card ${story.story_uuid === selectedStoryUUID ? "active" : ""} ${
-                      highlightStyle ? "story-card-highlighted" : ""
+                    className={`story-card ${
+                      story.story_uuid === selectedStoryUUID ? "active" : ""
                     }`.trim()}
-                    style={highlightStyle}
                     onClick={() => onSelectStory(story.story_uuid)}
                     role="button"
                     tabIndex={0}

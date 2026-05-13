@@ -289,12 +289,6 @@
     @apply cursor-pointer rounded-xl border border-panel-500 bg-panel-700 p-3 transition duration-100 ease-out;
   }
 
-  .story-card-highlighted {
-    border-color: color-mix(in srgb, var(--tag-highlight-color) 34%, #2f3336);
-    background: color-mix(in srgb, var(--tag-highlight-color) 8%, #16181c);
-    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
-  }
-
   .story-card:hover {
   }
 
@@ -1012,24 +1006,12 @@
     @apply mx-0 rounded-[10px] border border-transparent bg-transparent px-2 py-2;
   }
 
-  .app-root-viewer .story-card-highlighted {
-    border-color: color-mix(in srgb, var(--tag-highlight-color) 22%, transparent);
-    background: color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
-    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
-  }
-
   .app-root-viewer .story-card:hover {
     @apply bg-panel-700/70;
   }
 
   .app-root-viewer .story-card.active {
     @apply border-transparent bg-panel-700 shadow-none ring-0;
-  }
-
-  .app-root-viewer .story-card-highlighted.active {
-    border-color: color-mix(in srgb, var(--tag-highlight-color) 28%, transparent);
-    background: color-mix(in srgb, var(--tag-highlight-color) 9%, #16181c);
-    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
   .app-root-viewer .story-meta,

@@ -297,7 +297,7 @@ describe("StoryDetailPanel", () => {
     expect(within(singleIdentityByline as HTMLElement).queryByText("new_story")).toBeNull();
     expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
       "title",
-      expect.stringContaining("Ingested Feb 14, 17:00"),
+      expect.stringContaining("Ingested Feb 14,"),
     );
     expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
       "title",

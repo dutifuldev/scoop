@@ -4,7 +4,7 @@ import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleByline } from "./ArticleByline";
 import { ArticleTitleRow } from "./ArticleTitleRow";
-import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
+import { renderTextBlock, toParagraphs } from "./storyTextRendering";
 
 export interface MemberURLGroup {
   key: string;
@@ -167,11 +167,6 @@ function StoryArticleEntry({
           { key: "original", paragraphs: originalParagraphs, label: "Original" },
           { key: "translated", paragraphs: translatedParagraphs, label: "Translated" },
         ];
-  const collapsedPreviewText =
-    detailTextMode === "translated"
-      ? resolvedTranslatedText || resolvedOriginalText
-      : resolvedOriginalText || resolvedTranslatedText;
-
   const representativeOriginalTitle = (
     representative.original_title ||
     representative.normalized_title ||
@@ -193,8 +188,8 @@ function StoryArticleEntry({
     .filter(Boolean)
     .join(" · ");
 
-  const renderedArticleContent = (
-    <article className="detail-item-content article-body-expanded">
+  const renderedArticleBody = (
+    <>
       {isPreviewLoading && !hasOriginalContent ? (
         <p className="muted">Fetching reader preview...</p>
       ) : null}
@@ -229,6 +224,12 @@ function StoryArticleEntry({
           Reader preview unavailable. Showing captured content when available.
         </p>
       ) : null}
+    </>
+  );
+
+  const renderedArticleContent = (
+    <article className="detail-item-content article-body-expanded">
+      {renderedArticleBody}
     </article>
   );
 
@@ -264,17 +265,9 @@ function StoryArticleEntry({
           renderedArticleContent
         ) : (
           <div className="article-body-preview">
-            {isPreviewLoading && !hasOriginalContent ? (
-              <p className="muted">Fetching reader preview...</p>
-            ) : null}
-            {!isPreviewLoading && !hasOriginalContent && !hasTranslatedContent ? (
-              <p className="muted">No content captured for this item.</p>
-            ) : null}
-            {hasExpandableContent ? (
-              <p className="article-body-preview-text">
-                {buildMemberPreview(collapsedPreviewText)}
-              </p>
-            ) : null}
+            <article className="detail-item-content article-body-collapsed">
+              {renderedArticleBody}
+            </article>
           </div>
         )}
 

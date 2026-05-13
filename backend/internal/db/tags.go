@@ -16,28 +16,31 @@ import (
 var tagPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 type TagRecord struct {
-	TagID       int64      `json:"tag_id"`
-	TagUUID     string     `json:"tag_uuid"`
-	Tag         string     `json:"tag"`
-	Slug        string     `json:"-"`
-	Name        string     `json:"-"`
-	Description *string    `json:"description,omitempty"`
-	Color       *string    `json:"color,omitempty"`
-	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	TagID          int64      `json:"tag_id"`
+	TagUUID        string     `json:"tag_uuid"`
+	Tag            string     `json:"tag"`
+	Slug           string     `json:"-"`
+	Name           string     `json:"-"`
+	Description    *string    `json:"description,omitempty"`
+	Color          *string    `json:"color,omitempty"`
+	HighlightColor *string    `json:"highlight_color,omitempty"`
+	ArchivedAt     *time.Time `json:"archived_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type UpsertTagOptions struct {
-	Slug        string
-	Description *string
-	Color       *string
+	Slug           string
+	Description    *string
+	Color          *string
+	HighlightColor *string
 }
 
 type UpdateTagOptions struct {
-	NewSlug     *string
-	Description *string
-	Color       *string
+	NewSlug        *string
+	Description    *string
+	Color          *string
+	HighlightColor *string
 }
 
 func NormalizeTagSlug(raw string) string {
@@ -110,16 +113,21 @@ func (p *Pool) CreateTag(ctx context.Context, opts UpsertTagOptions, now time.Ti
 	if err != nil {
 		return nil, err
 	}
+	highlightColor, err := normalizeOptionalColor(opts.HighlightColor)
+	if err != nil {
+		return nil, err
+	}
 
 	var tag Tag
 	err = p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		tag = Tag{
-			Slug:        slug,
-			Name:        slug,
-			Description: description,
-			Color:       color,
-			CreatedAt:   now.UTC(),
-			UpdatedAt:   now.UTC(),
+			Slug:           slug,
+			Name:           slug,
+			Description:    description,
+			Color:          color,
+			HighlightColor: highlightColor,
+			CreatedAt:      now.UTC(),
+			UpdatedAt:      now.UTC(),
 		}
 		if err := tx.Create(&tag).Error; err != nil {
 			return fmt.Errorf("create tag: %w", err)
@@ -168,6 +176,14 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 		}
 		updates["color"] = color
 		details["color"] = color
+	}
+	if opts.HighlightColor != nil {
+		highlightColor, err := normalizeOptionalColor(opts.HighlightColor)
+		if err != nil {
+			return nil, err
+		}
+		updates["highlight_color"] = highlightColor
+		details["highlight_color"] = highlightColor
 	}
 	if len(updates) == 0 {
 		return nil, fmt.Errorf("at least one update field is required")
@@ -361,7 +377,7 @@ func (p *Pool) ListTagsForArticleUUIDs(ctx context.Context, articleUUIDs []strin
 	uuidCondition, uuidArgs := uuidInCondition("a.article_uuid", articleUUIDs)
 	if err := p.gdb.WithContext(ctx).
 		Table("news.articles AS a").
-		Select("a.article_uuid::text AS article_uuid, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at").
+		Select("a.article_uuid::text AS article_uuid, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at").
 		Joins("JOIN news.article_tags AS at ON at.article_id = a.article_id").
 		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
 		Where(uuidCondition, uuidArgs...).
@@ -385,7 +401,7 @@ func (p *Pool) ListTagsForStoryIDs(ctx context.Context, storyIDs []int64) (map[i
 	var rows []storyTagRow
 	if err := p.gdb.WithContext(ctx).
 		Table("news.story_articles AS sm").
-		Distinct("sm.story_id, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.archived_at, t.created_at, t.updated_at").
+		Distinct("sm.story_id, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at").
 		Joins("JOIN news.articles AS a ON a.article_id = sm.article_id AND a.deleted_at IS NULL").
 		Joins("JOIN news.article_tags AS at ON at.article_id = sm.article_id").
 		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
@@ -450,71 +466,76 @@ func insertAuditEventGORM(ctx context.Context, tx *gorm.DB, actorUserID *int64, 
 }
 
 type articleTagRow struct {
-	ArticleUUID string
-	TagID       int64
-	TagUUID     string
-	Slug        string
-	Name        string
-	Description *string
-	Color       *string
-	ArchivedAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ArticleUUID    string
+	TagID          int64
+	TagUUID        string
+	Slug           string
+	Name           string
+	Description    *string
+	Color          *string
+	HighlightColor *string
+	ArchivedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (r articleTagRow) tagRecord() TagRecord {
 	return tagModelToRecord(Tag{
-		TagID:       r.TagID,
-		TagUUID:     r.TagUUID,
-		Slug:        r.Slug,
-		Name:        r.Name,
-		Description: r.Description,
-		Color:       r.Color,
-		ArchivedAt:  r.ArchivedAt,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
+		TagID:          r.TagID,
+		TagUUID:        r.TagUUID,
+		Slug:           r.Slug,
+		Name:           r.Name,
+		Description:    r.Description,
+		Color:          r.Color,
+		HighlightColor: r.HighlightColor,
+		ArchivedAt:     r.ArchivedAt,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	})
 }
 
 type storyTagRow struct {
-	StoryID     int64
-	TagID       int64
-	TagUUID     string
-	Slug        string
-	Name        string
-	Description *string
-	Color       *string
-	ArchivedAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	StoryID        int64
+	TagID          int64
+	TagUUID        string
+	Slug           string
+	Name           string
+	Description    *string
+	Color          *string
+	HighlightColor *string
+	ArchivedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (r storyTagRow) tagRecord() TagRecord {
 	return tagModelToRecord(Tag{
-		TagID:       r.TagID,
-		TagUUID:     r.TagUUID,
-		Slug:        r.Slug,
-		Name:        r.Name,
-		Description: r.Description,
-		Color:       r.Color,
-		ArchivedAt:  r.ArchivedAt,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
+		TagID:          r.TagID,
+		TagUUID:        r.TagUUID,
+		Slug:           r.Slug,
+		Name:           r.Name,
+		Description:    r.Description,
+		Color:          r.Color,
+		HighlightColor: r.HighlightColor,
+		ArchivedAt:     r.ArchivedAt,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	})
 }
 
 func tagModelToRecord(tag Tag) TagRecord {
 	return TagRecord{
-		TagID:       tag.TagID,
-		TagUUID:     tag.TagUUID,
-		Tag:         tag.Slug,
-		Slug:        tag.Slug,
-		Name:        tag.Name,
-		Description: tag.Description,
-		Color:       tag.Color,
-		ArchivedAt:  tag.ArchivedAt,
-		CreatedAt:   tag.CreatedAt,
-		UpdatedAt:   tag.UpdatedAt,
+		TagID:          tag.TagID,
+		TagUUID:        tag.TagUUID,
+		Tag:            tag.Slug,
+		Slug:           tag.Slug,
+		Name:           tag.Name,
+		Description:    tag.Description,
+		Color:          tag.Color,
+		HighlightColor: tag.HighlightColor,
+		ArchivedAt:     tag.ArchivedAt,
+		CreatedAt:      tag.CreatedAt,
+		UpdatedAt:      tag.UpdatedAt,
 	}
 }
 

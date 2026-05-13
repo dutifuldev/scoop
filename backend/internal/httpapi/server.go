@@ -56,6 +56,7 @@ type storyListFilter struct {
 	Tag        string
 	From       *time.Time
 	To         *time.Time
+	TimeZone   string
 	Lang       string
 	Page       int
 	PageSize   int
@@ -79,6 +80,7 @@ type storyListItem struct {
 	DetectedLanguage string                    `json:"detected_language"`
 	CanonicalURL     *string                   `json:"canonical_url,omitempty"`
 	Status           string                    `json:"status"`
+	PublishedAt      *time.Time                `json:"published_at,omitempty"`
 	FirstSeenAt      time.Time                 `json:"first_seen_at"`
 	LastSeenAt       time.Time                 `json:"last_seen_at"`
 	SourceCount      int                       `json:"source_count"`
@@ -498,7 +500,12 @@ func (s *Server) handleStoryDays(c echo.Context) error {
 	}
 
 	collection := normalizeCollection(c.QueryParam("collection"))
-	items, err := s.queryStoryDays(c.Request().Context(), collection, limit)
+	_, timeZone, err := parseClientTimeZone(c.QueryParam("tz"))
+	if err != nil {
+		return failValidation(c, map[string]string{"tz": "must be a valid IANA timezone"})
+	}
+
+	items, err := s.queryStoryDays(c.Request().Context(), collection, limit, timeZone)
 	if err != nil {
 		s.logger.Error().Err(err).Str("collection", collection).Msg("query story day buckets failed")
 		return internalError(c, "Failed to load story day buckets")
@@ -508,6 +515,7 @@ func (s *Server) handleStoryDays(c echo.Context) error {
 		"items":      items,
 		"collection": collection,
 		"limit":      limit,
+		"tz":         timeZone,
 	})
 }
 
@@ -522,11 +530,16 @@ func (s *Server) handleStories(c echo.Context) error {
 		return failValidation(c, map[string]string{"page_size": err.Error()})
 	}
 
-	from, err := parseTimeFilter(c.QueryParam("from"), false)
+	location, timeZone, err := parseClientTimeZone(c.QueryParam("tz"))
+	if err != nil {
+		return failValidation(c, map[string]string{"tz": "must be a valid IANA timezone"})
+	}
+
+	from, err := parseTimeFilter(c.QueryParam("from"), false, location)
 	if err != nil {
 		return failValidation(c, map[string]string{"from": "must be RFC3339 or YYYY-MM-DD"})
 	}
-	to, err := parseTimeFilter(c.QueryParam("to"), true)
+	to, err := parseTimeFilter(c.QueryParam("to"), true, location)
 	if err != nil {
 		return failValidation(c, map[string]string{"to": "must be RFC3339 or YYYY-MM-DD"})
 	}
@@ -541,6 +554,7 @@ func (s *Server) handleStories(c echo.Context) error {
 		Tag:        db.NormalizeTagSlug(c.QueryParam("tag")),
 		From:       from,
 		To:         to,
+		TimeZone:   timeZone,
 		Lang:       normalizeLanguage(c.QueryParam("lang")),
 		Page:       page,
 		PageSize:   pageSize,
@@ -572,6 +586,7 @@ func (s *Server) handleStories(c echo.Context) error {
 			"tag":        filter.Tag,
 			"from":       filter.From,
 			"to":         filter.To,
+			"tz":         filter.TimeZone,
 			"lang":       filter.Lang,
 		},
 	})
@@ -884,14 +899,27 @@ func (s *Server) queryStoryList(ctx context.Context, filter storyListFilter) (in
 	}
 
 	const countQuery = `
+WITH story_publish_times AS (
+	SELECT
+		sa.story_id,
+		MAX(a.published_at) AS story_published_at
+	FROM news.story_articles sa
+	JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+		AND a.published_at IS NOT NULL
+	GROUP BY sa.story_id
+)
 SELECT COUNT(*)
 FROM news.stories s
+LEFT JOIN story_publish_times spt
+	ON spt.story_id = s.story_id
 WHERE s.deleted_at IS NULL
   AND ($1 = '' OR s.collection = $1)
   AND ($2 = '' OR s.status = $2)
   AND ($3 = '' OR s.canonical_title ILIKE $3 OR COALESCE(s.canonical_url, '') ILIKE $3)
-  AND ($4::timestamptz IS NULL OR s.last_seen_at >= $4)
-  AND ($5::timestamptz IS NULL OR s.last_seen_at <= $5)
+  AND ($4::timestamptz IS NULL OR spt.story_published_at >= $4)
+  AND ($5::timestamptz IS NULL OR spt.story_published_at <= $5)
   AND (
 	$6 = ''
 	OR EXISTS (
@@ -916,6 +944,17 @@ WHERE s.deleted_at IS NULL
 	offset := (filter.Page - 1) * filter.PageSize
 
 	const rowsQuery = `
+WITH story_publish_times AS (
+	SELECT
+		sa.story_id,
+		MAX(a.published_at) AS story_published_at
+	FROM news.story_articles sa
+	JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+		AND a.published_at IS NOT NULL
+	GROUP BY sa.story_id
+)
 SELECT
 	s.story_id,
 	s.story_uuid::text,
@@ -931,6 +970,7 @@ SELECT
 	st.translated_text,
 	s.canonical_url,
 	s.status,
+	spt.story_published_at,
 	s.first_seen_at,
 	s.last_seen_at,
 	(SELECT COUNT(DISTINCT a.source)
@@ -951,6 +991,8 @@ SELECT
 	rd.source_item_id,
 	rd.published_at
 FROM news.stories s
+LEFT JOIN story_publish_times spt
+	ON spt.story_id = s.story_id
 LEFT JOIN news.articles rd
 	ON rd.article_id = s.representative_article_id
 	AND rd.deleted_at IS NULL
@@ -978,8 +1020,8 @@ WHERE s.deleted_at IS NULL
   AND ($1 = '' OR s.collection = $1)
   AND ($2 = '' OR s.status = $2)
   AND ($3 = '' OR s.canonical_title ILIKE $3 OR COALESCE(s.canonical_url, '') ILIKE $3)
-  AND ($4::timestamptz IS NULL OR s.last_seen_at >= $4)
-  AND ($5::timestamptz IS NULL OR s.last_seen_at <= $5)
+  AND ($4::timestamptz IS NULL OR spt.story_published_at >= $4)
+  AND ($5::timestamptz IS NULL OR spt.story_published_at <= $5)
   AND (
 	$6 = ''
 	OR EXISTS (
@@ -994,7 +1036,7 @@ WHERE s.deleted_at IS NULL
 			AND tag_t.slug = $6
 	)
   )
-ORDER BY s.last_seen_at DESC, s.story_id DESC
+ORDER BY spt.story_published_at DESC NULLS LAST, s.story_id DESC
 LIMIT $8
 OFFSET $9
 `
@@ -1036,6 +1078,7 @@ OFFSET $9
 			&row.TranslatedTitle,
 			&row.CanonicalURL,
 			&row.Status,
+			&row.PublishedAt,
 			&row.FirstSeenAt,
 			&row.LastSeenAt,
 			&row.SourceCount,
@@ -1170,6 +1213,7 @@ SELECT
 	st.translated_text,
 	s.canonical_url,
 	s.status,
+	spt.story_published_at,
 	s.first_seen_at,
 	s.last_seen_at,
 	(SELECT COUNT(DISTINCT a.source)
@@ -1190,6 +1234,15 @@ SELECT
 	rd.source_item_id,
 	rd.published_at
 FROM news.stories s
+LEFT JOIN LATERAL (
+	SELECT MAX(a.published_at) AS story_published_at
+	FROM news.story_articles sa
+	JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+		AND a.published_at IS NOT NULL
+	WHERE sa.story_id = s.story_id
+) spt ON TRUE
 LEFT JOIN news.articles rd
 	ON rd.article_id = s.representative_article_id
 	AND rd.deleted_at IS NULL
@@ -1233,6 +1286,7 @@ WHERE s.story_uuid = $1::uuid
 		&story.TranslatedTitle,
 		&story.CanonicalURL,
 		&story.Status,
+		&story.PublishedAt,
 		&story.FirstSeenAt,
 		&story.LastSeenAt,
 		&story.SourceCount,
@@ -1340,7 +1394,7 @@ LEFT JOIN LATERAL (
 LEFT JOIN news.dedup_events de
 	ON de.article_id = d.article_id
 WHERE sm.story_id = $1
-ORDER BY sm.matched_at DESC
+ORDER BY d.published_at DESC NULLS LAST, sm.matched_at DESC
 `
 
 	rows, err := s.pool.Query(ctx, membersQuery, story.StoryID, lang)
@@ -1510,19 +1564,32 @@ ORDER BY 1
 	return items, nil
 }
 
-func (s *Server) queryStoryDays(ctx context.Context, collection string, limit int) ([]storyDayBucket, error) {
+func (s *Server) queryStoryDays(ctx context.Context, collection string, limit int, timeZone string) ([]storyDayBucket, error) {
 	const q = `
+WITH story_publish_times AS (
+	SELECT
+		sa.story_id,
+		MAX(a.published_at) AS story_published_at
+	FROM news.story_articles sa
+	JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+		AND a.published_at IS NOT NULL
+	GROUP BY sa.story_id
+)
 SELECT
-	TO_CHAR((s.last_seen_at AT TIME ZONE 'Europe/Berlin')::date, 'YYYY-MM-DD') AS day_bucket,
+	TO_CHAR(timezone($3, spt.story_published_at)::date, 'YYYY-MM-DD') AS day_bucket,
 	COUNT(*)::BIGINT AS story_count
 FROM news.stories s
+JOIN story_publish_times spt
+	ON spt.story_id = s.story_id
 WHERE s.deleted_at IS NULL
   AND ($1 = '' OR s.collection = $1)
 GROUP BY day_bucket
 ORDER BY day_bucket DESC
 LIMIT $2
 `
-	rows, err := s.pool.Query(ctx, q, collection, limit)
+	rows, err := s.pool.Query(ctx, q, collection, limit, timeZone)
 	if err != nil {
 		return nil, fmt.Errorf("query story day buckets: %w", err)
 	}
@@ -1674,10 +1741,26 @@ func parsePositiveInt(raw string, defaultValue, minValue, maxValue int) (int, er
 	return value, nil
 }
 
-func parseTimeFilter(raw string, endOfDay bool) (*time.Time, error) {
+func parseClientTimeZone(raw string) (*time.Location, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		trimmed = "UTC"
+	}
+
+	location, err := time.LoadLocation(trimmed)
+	if err != nil {
+		return nil, "", err
+	}
+	return location, trimmed, nil
+}
+
+func parseTimeFilter(raw string, endOfDay bool, location *time.Location) (*time.Time, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, nil
+	}
+	if location == nil {
+		location = time.UTC
 	}
 
 	if ts, err := time.Parse(time.RFC3339, trimmed); err == nil {
@@ -1686,9 +1769,10 @@ func parseTimeFilter(raw string, endOfDay bool) (*time.Time, error) {
 	}
 
 	if day, err := time.Parse("2006-01-02", trimmed); err == nil {
-		utc := day.UTC()
+		local := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, location)
+		utc := local.UTC()
 		if endOfDay {
-			utc = utc.Add((24 * time.Hour) - time.Nanosecond)
+			utc = local.Add((24 * time.Hour) - time.Nanosecond).UTC()
 		}
 		return &utc, nil
 	}

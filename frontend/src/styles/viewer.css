@@ -285,7 +285,20 @@
   }
 
   .story-card {
+    --tag-highlight-color: transparent;
     @apply cursor-pointer rounded-xl border border-panel-500 bg-panel-700 p-3 transition duration-100 ease-out;
+  }
+
+  .story-card-highlighted {
+    border-color: color-mix(in srgb, var(--tag-highlight-color) 34%, #2f3336);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--tag-highlight-color) 18%, transparent),
+        transparent 42%
+      ),
+      color-mix(in srgb, var(--tag-highlight-color) 6%, #16181c);
+    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
   .story-card:hover {
@@ -473,6 +486,7 @@
   }
 
   .article-entry {
+    --tag-highlight-color: transparent;
     --article-entry-pad-x: 0rem;
     --article-entry-pad-top: 0rem;
     --article-avatar-size: 2.5rem;
@@ -480,6 +494,17 @@
     --article-rail-left: calc(var(--article-entry-pad-x) + (var(--article-avatar-size) / 2));
     --article-avatar-top: calc(var(--article-entry-pad-top) + var(--article-byline-offset-top));
     @apply relative min-w-0 bg-transparent px-0 pb-4 pt-0;
+  }
+
+  .article-entry-highlighted {
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--tag-highlight-color) 13%, transparent),
+        transparent 48%
+      ),
+      transparent;
+    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
   .article-entry::before,
@@ -563,9 +588,13 @@
   }
 
   .article-byline-avatar {
-    @apply relative z-[1] flex shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
+    @apply relative z-[1] flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
     width: var(--article-avatar-size);
     height: var(--article-avatar-size);
+  }
+
+  .article-byline-avatar-image {
+    @apply block h-full w-full object-cover;
   }
 
   .article-byline-main {
@@ -995,12 +1024,36 @@
     @apply mx-0 rounded-[10px] border border-transparent bg-transparent px-2 py-2;
   }
 
+  .app-root-viewer .story-card-highlighted {
+    border-color: color-mix(in srgb, var(--tag-highlight-color) 22%, transparent);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--tag-highlight-color) 15%, transparent),
+        transparent 46%
+      ),
+      transparent;
+    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
+  }
+
   .app-root-viewer .story-card:hover {
     @apply bg-panel-700/70;
   }
 
   .app-root-viewer .story-card.active {
     @apply border-transparent bg-panel-700 shadow-none ring-0;
+  }
+
+  .app-root-viewer .story-card-highlighted.active {
+    border-color: color-mix(in srgb, var(--tag-highlight-color) 28%, transparent);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--tag-highlight-color) 18%, transparent),
+        transparent 46%
+      ),
+      #16181c;
+    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
   .app-root-viewer .story-meta,

@@ -32,6 +32,7 @@ interface StoryReaderPanelProps {
   readerStateKey: string;
   onLoadNextStoryPage: () => void;
   onActiveStoryChange: (storyUUID: string) => void;
+  onStoryDetailLoaded?: (detail: StoryDetailResponse) => void;
   onTranslationStateChange?: (storyUUID: string, isTranslating: boolean) => void;
   onScrollTargetSettled?: (storyUUID: string) => void;
 }
@@ -124,6 +125,7 @@ export function StoryReaderPanel({
   readerStateKey,
   onLoadNextStoryPage,
   onActiveStoryChange,
+  onStoryDetailLoaded,
   onTranslationStateChange,
   onScrollTargetSettled,
 }: StoryReaderPanelProps): JSX.Element {
@@ -597,6 +599,7 @@ export function StoryReaderPanel({
               isActive={isActive}
               isLoading={Boolean(query?.isPending)}
               error={query?.error instanceof Error ? query.error.message : ""}
+              onStoryDetailLoaded={onStoryDetailLoaded}
               onTranslationStateChange={onTranslationStateChange}
             />
           );
@@ -624,6 +627,7 @@ interface StoryReaderSectionProps {
   isLoading: boolean;
   error: string;
   refCallback: RefCallback<HTMLElement>;
+  onStoryDetailLoaded?: (detail: StoryDetailResponse) => void;
   onTranslationStateChange?: (storyUUID: string, isTranslating: boolean) => void;
 }
 
@@ -637,6 +641,7 @@ function StoryReaderSection({
   isLoading,
   error,
   refCallback,
+  onStoryDetailLoaded,
   onTranslationStateChange,
 }: StoryReaderSectionProps): JSX.Element {
   const sectionActiveLang = useMemo(() => {
@@ -668,6 +673,12 @@ function StoryReaderSection({
     isTranslationActive: isActive,
     onTranslationStateChange,
   });
+
+  useEffect(() => {
+    if (detail) {
+      onStoryDetailLoaded?.(detail);
+    }
+  }, [detail, onStoryDetailLoaded]);
 
   return (
     <section

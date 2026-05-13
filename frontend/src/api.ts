@@ -17,6 +17,7 @@ import type {
   UserSettings,
 } from "./types";
 import { normalizeLanguageCode } from "./lib/language";
+import { getViewerTimeZone } from "./lib/viewerTimeZone";
 
 interface JSendRequestOptions extends Omit<RequestInit, "body"> {
   bodyJson?: unknown;
@@ -144,9 +145,11 @@ export async function updateCollectionSettings(
 export async function getStoryDays(
   collection: string,
   limit = 45,
+  timeZone = getViewerTimeZone(),
 ): Promise<{ items: StoryDayBucket[] }> {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
+  params.set("tz", timeZone);
   if (collection) {
     params.set("collection", collection);
   }
@@ -157,6 +160,7 @@ export async function getStories(filters: StoryFilters): Promise<StoriesResponse
   const params = new URLSearchParams();
   params.set("page", String(filters.page));
   params.set("page_size", String(filters.pageSize));
+  params.set("tz", getViewerTimeZone());
   if (filters.collection) {
     params.set("collection", filters.collection);
   }

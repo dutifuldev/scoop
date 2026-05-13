@@ -84,15 +84,16 @@ func (Article) TableName() string { return "news.articles" }
 
 // Tag maps news.tags.
 type Tag struct {
-	TagID       int64      `gorm:"column:tag_id;primaryKey;autoIncrement"`
-	TagUUID     string     `gorm:"column:tag_uuid;type:uuid;not null;default:gen_random_uuid();unique"`
-	Slug        string     `gorm:"column:slug;type:text;not null;uniqueIndex:uq_tags_slug"`
-	Name        string     `gorm:"column:name;type:text;not null"`
-	Description *string    `gorm:"column:description;type:text"`
-	Color       *string    `gorm:"column:color;type:text"`
-	ArchivedAt  *time.Time `gorm:"column:archived_at;type:timestamptz"`
-	CreatedAt   time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at;type:timestamptz;not null;default:now()"`
+	TagID          int64      `gorm:"column:tag_id;primaryKey;autoIncrement"`
+	TagUUID        string     `gorm:"column:tag_uuid;type:uuid;not null;default:gen_random_uuid();unique"`
+	Slug           string     `gorm:"column:slug;type:text;not null;uniqueIndex:uq_tags_slug"`
+	Name           string     `gorm:"column:name;type:text;not null"`
+	Description    *string    `gorm:"column:description;type:text"`
+	Color          *string    `gorm:"column:color;type:text"`
+	HighlightColor *string    `gorm:"column:highlight_color;type:text"`
+	ArchivedAt     *time.Time `gorm:"column:archived_at;type:timestamptz"`
+	CreatedAt      time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;type:timestamptz;not null;default:now()"`
 }
 
 func (Tag) TableName() string { return "news.tags" }
@@ -114,6 +115,7 @@ type PersonIdentity struct {
 	Provider           string     `gorm:"column:provider;type:text;not null"`
 	ProviderUserID     *string    `gorm:"column:provider_user_id;type:text"`
 	Handle             *string    `gorm:"column:handle;type:text"`
+	AvatarURL          *string    `gorm:"column:avatar_url;type:text"`
 	IdentityRef        string     `gorm:"column:identity_ref;type:text;not null;unique"`
 	ArchivedAt         *time.Time `gorm:"column:archived_at;type:timestamptz"`
 	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`

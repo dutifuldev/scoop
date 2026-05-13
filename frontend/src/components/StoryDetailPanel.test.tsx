@@ -194,6 +194,7 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             tag_uuid: "tag-uuid-i0",
             tag: "i0",
             color: "#f4212e",
+            highlight_color: "#faa61a",
             created_at: "2026-02-14T09:00:00Z",
             updated_at: "2026-02-14T09:00:00Z",
           },
@@ -205,6 +206,8 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             provider: "discord",
             provider_user_id: "123456789012345678",
             handle: "alice",
+            avatar_url:
+              "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
             identity_ref: "id://discord/id/123456789012345678?handle=alice",
             created_at: "2026-02-14T09:00:00Z",
             updated_at: "2026-02-14T09:00:00Z",
@@ -293,10 +296,6 @@ describe("StoryDetailPanel", () => {
     expect(within(singleIdentityByline as HTMLElement).queryByText("new_story")).toBeNull();
     expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
       "title",
-      expect.stringContaining("Ingested Feb 14,"),
-    );
-    expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
-      "title",
       expect.stringContaining("Decision: new story"),
     );
     const singleArticleTitle = within(singleIdentityByline as HTMLElement).getByText("Solo Story");
@@ -307,7 +306,12 @@ describe("StoryDetailPanel", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
     expect(screen.getByText("@alice").closest(".article-byline")).not.toBeNull();
-    expect(container.querySelector(".article-byline-avatar")).not.toBeNull();
+    const avatar = container.querySelector(".article-byline-avatar");
+    expect(avatar).not.toBeNull();
+    expect(avatar?.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
+    );
     expect(container.querySelector(".article-byline-provider-icon")).not.toBeNull();
     expect(screen.getByRole("link", { name: "solo.example.com" })).toHaveClass("title-action");
     expect(
@@ -318,7 +322,12 @@ describe("StoryDetailPanel", () => {
     expect(screen.queryByRole("button", { name: "Add article person identity" })).toBeNull();
     expect(screen.queryByLabelText("Article person identity controls")).toBeNull();
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
-    expect(container.querySelector(".article-entry")).not.toBeNull();
+    const highlightedArticle = container.querySelector(".article-entry");
+    expect(highlightedArticle).not.toBeNull();
+    expect(highlightedArticle).toHaveClass("article-entry-highlighted");
+    expect(
+      (highlightedArticle as HTMLElement).style.getPropertyValue("--tag-highlight-color"),
+    ).toBe("#faa61a");
     expect(container.querySelector(".member-card-single")).toBeNull();
     expect(container.querySelector(".detail-item-content-single")).toBeNull();
     expect(container.querySelector(".detail-text-block-single")).toBeNull();

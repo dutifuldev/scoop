@@ -27,6 +27,7 @@ export interface Tag {
   tag: string;
   description?: string | null;
   color?: string | null;
+  highlight_color?: string | null;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -39,6 +40,7 @@ export interface PersonIdentity {
   provider_user_id?: string | null;
   handle?: string | null;
   display_name?: string | null;
+  avatar_url?: string | null;
   identity_ref: string;
   archived_at?: string | null;
   created_at: string;
@@ -56,6 +58,7 @@ export interface StoryListItem {
   detected_language: string;
   canonical_url?: string;
   status: string;
+  published_at?: string;
   first_seen_at: string;
   last_seen_at: string;
   source_count: number;

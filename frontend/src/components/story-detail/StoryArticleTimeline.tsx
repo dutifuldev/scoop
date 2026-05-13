@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { tagHighlightStyle } from "../../lib/tagHighlight";
+import { getViewerTimeZone } from "../../lib/viewerTimeZone";
 import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticlePreview, Tag } from "../../types";
 import { ArticleByline } from "./ArticleByline";
@@ -107,6 +109,7 @@ function StoryArticleEntry({
 }: StoryArticleEntryProps): JSX.Element {
   const [isBodyExpanded, setIsBodyExpanded] = useState(false);
   const representative = group.representative;
+  const highlightStyle = tagHighlightStyle(representative.tags);
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
     : "";
@@ -160,9 +163,11 @@ function StoryArticleEntry({
     activeLang !== "" && representativeTranslatedTitle !== ""
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
+  const viewerTimeZone = getViewerTimeZone();
   const bylineDateTitle = [
-    representative.published_at ? `Published ${formatDateTime(representative.published_at)}` : "",
-    representative.matched_at ? `Ingested ${formatDateTime(representative.matched_at)}` : "",
+    representative.published_at
+      ? `Published ${formatDateTime(representative.published_at, viewerTimeZone)}`
+      : "",
     decisionLabel ? `Decision: ${decisionLabel}` : "",
     group.members.length > 1
       ? `Merged ${group.members.length} items from ${group.sourceCount} sources`
@@ -214,7 +219,10 @@ function StoryArticleEntry({
     <article
       className={`article-entry ${isSelected ? "article-entry-selected" : ""} ${
         hasPrevious ? "article-entry-has-prev" : ""
-      } ${hasNext ? "article-entry-has-next" : ""}`.trim()}
+      } ${hasNext ? "article-entry-has-next" : ""} ${
+        highlightStyle ? "article-entry-highlighted" : ""
+      }`.trim()}
+      style={highlightStyle}
       data-item-uuid={representative.story_article_uuid}
     >
       <ArticleByline

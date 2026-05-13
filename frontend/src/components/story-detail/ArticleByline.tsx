@@ -14,7 +14,6 @@ interface ArticleBylineProps {
   publishedAt?: string;
   source?: string;
   dateTitle?: string;
-  showConnector?: boolean;
   children?: ReactNode;
 }
 
@@ -54,7 +53,6 @@ export function ArticleByline({
   publishedAt,
   source = "",
   dateTitle = "",
-  showConnector = false,
   children,
 }: ArticleBylineProps): JSX.Element {
   const identity = primaryPersonIdentity(identities);
@@ -70,7 +68,6 @@ export function ArticleByline({
     <div className="article-byline" aria-label="Article byline">
       <span className="article-byline-rail" aria-hidden="true">
         <span className="article-byline-avatar">{initialsFor(avatarLabel)}</span>
-        {showConnector ? <span className="article-byline-connector" /> : null}
       </span>
       <div className="article-byline-main">
         <div className="article-byline-identity">

@@ -44,6 +44,8 @@ interface StoryArticleTimelineProps {
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
+  connectPrevious?: boolean;
+  connectNext?: boolean;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
@@ -53,8 +55,8 @@ interface StoryArticleEntryProps {
   storyUUID: string;
   group: MemberURLGroup;
   isSelected: boolean;
-  isLast: boolean;
-  isMultiArticle: boolean;
+  hasPrevious: boolean;
+  hasNext: boolean;
   detailTextMode: "translated" | "original";
   activeLang: string;
   availableTags: Tag[];
@@ -153,6 +155,8 @@ export function StoryArticleTimeline({
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
+  connectPrevious = false,
+  connectNext = false,
   onAddArticleTag,
   onRemoveArticleTag,
 }: StoryArticleTimelineProps): JSX.Element {
@@ -166,8 +170,8 @@ export function StoryArticleTimeline({
           storyUUID={storyUUID}
           group={group}
           isSelected={selectedItemUUID === group.representative.story_article_uuid}
-          isLast={index === groups.length - 1}
-          isMultiArticle={groups.length > 1}
+          hasPrevious={connectPrevious || index > 0}
+          hasNext={connectNext || index < groups.length - 1}
           detailTextMode={detailTextMode}
           activeLang={activeLang}
           availableTags={availableTags}
@@ -188,8 +192,8 @@ function StoryArticleEntry({
   storyUUID,
   group,
   isSelected,
-  isLast,
-  isMultiArticle,
+  hasPrevious,
+  hasNext,
   detailTextMode,
   activeLang,
   availableTags,
@@ -307,7 +311,9 @@ function StoryArticleEntry({
 
   return (
     <article
-      className={`article-entry ${isSelected ? "article-entry-selected" : ""}`.trim()}
+      className={`article-entry ${isSelected ? "article-entry-selected" : ""} ${
+        hasPrevious ? "article-entry-has-prev" : ""
+      } ${hasNext ? "article-entry-has-next" : ""}`.trim()}
       data-item-uuid={representative.story_article_uuid}
     >
       <ArticleByline
@@ -315,7 +321,6 @@ function StoryArticleEntry({
         publishedAt={representative.published_at}
         source={representative.source}
         dateTitle={bylineDateTitle}
-        showConnector={isMultiArticle && !isLast}
       >
         <div className="article-byline-title-stack">
           <ArticleTitleRow

@@ -473,7 +473,39 @@
   }
 
   .article-entry {
-    @apply min-w-0 bg-transparent px-0 pb-4 pt-0;
+    --article-entry-pad-x: 0rem;
+    --article-entry-pad-top: 0rem;
+    --article-avatar-size: 2.5rem;
+    --article-byline-offset-top: 0.5rem;
+    --article-rail-left: calc(var(--article-entry-pad-x) + (var(--article-avatar-size) / 2));
+    --article-avatar-top: calc(var(--article-entry-pad-top) + var(--article-byline-offset-top));
+    @apply relative min-w-0 bg-transparent px-0 pb-4 pt-0;
+  }
+
+  .article-entry::before,
+  .article-entry::after {
+    @apply bg-panel-500/80;
+    content: "";
+    position: absolute;
+    left: calc(var(--article-rail-left) - 1px);
+    z-index: 0;
+    width: 2px;
+    pointer-events: none;
+  }
+
+  .article-entry::before {
+    top: 0;
+    height: var(--article-avatar-top);
+  }
+
+  .article-entry::after {
+    top: calc(var(--article-avatar-top) + var(--article-avatar-size));
+    bottom: 0;
+  }
+
+  .article-entry:not(.article-entry-has-prev)::before,
+  .article-entry:not(.article-entry-has-next)::after {
+    display: none;
   }
 
   .article-entry-selected {
@@ -522,21 +554,18 @@
 
   .article-byline {
     @apply mt-2 grid min-w-0 items-stretch;
-    grid-template-columns: 2.5rem minmax(0, 1fr);
+    grid-template-columns: var(--article-avatar-size) minmax(0, 1fr);
     column-gap: 0.75rem;
   }
 
   .article-byline-rail {
-    @apply grid min-h-full justify-items-center;
-    grid-template-rows: auto minmax(0, 1fr);
+    @apply relative z-[1] flex justify-center;
   }
 
   .article-byline-avatar {
-    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
-  }
-
-  .article-byline-connector {
-    @apply mt-2 w-px min-h-6 bg-panel-500/80;
+    @apply relative z-[1] flex shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
+    width: var(--article-avatar-size);
+    height: var(--article-avatar-size);
   }
 
   .article-byline-main {
@@ -985,6 +1014,8 @@
 
   .app-root-viewer .article-entry {
     @apply px-5 pb-7 pt-4;
+    --article-entry-pad-x: 1.25rem;
+    --article-entry-pad-top: 1rem;
   }
 
   .app-root-viewer .article-entry-selected {

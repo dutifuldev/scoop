@@ -426,7 +426,9 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByRole("link", { name: "b.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
     expect(screen.getByText("i0")).toHaveClass("title-tag");
-    expect(container.querySelector(".article-byline-connector")).not.toBeNull();
+    expect(container.querySelector(".article-byline-connector")).toBeNull();
+    expect(container.querySelector(".article-entry-has-next")).not.toBeNull();
+    expect(container.querySelector(".article-entry-has-prev")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     expect(container.querySelector(".member-card-single")).toBeNull();
     expect(container.querySelector(".member-toggle")).toBeNull();

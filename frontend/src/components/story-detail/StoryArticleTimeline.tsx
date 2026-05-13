@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
@@ -126,6 +126,8 @@ function StoryArticleEntry({
   onRemoveArticleTag,
 }: StoryArticleEntryProps): JSX.Element {
   const [isBodyExpanded, setIsBodyExpanded] = useState(false);
+  const [isBodyOverflowing, setIsBodyOverflowing] = useState(false);
+  const collapsedBodyRef = useRef<HTMLElement | null>(null);
   const representative = group.representative;
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
@@ -233,6 +235,44 @@ function StoryArticleEntry({
     </article>
   );
 
+  useEffect(() => {
+    if (!hasExpandableContent) {
+      setIsBodyOverflowing(false);
+      return;
+    }
+
+    const body = collapsedBodyRef.current;
+    if (!body) {
+      return;
+    }
+
+    const measure = (): void => {
+      setIsBodyOverflowing(body.scrollHeight > body.clientHeight + 1);
+    };
+
+    measure();
+    const frame = window.requestAnimationFrame(measure);
+    const timeout = window.setTimeout(measure, 120);
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(measure);
+      resizeObserver.observe(body);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+      resizeObserver?.disconnect();
+    };
+  }, [
+    detailTextMode,
+    hasExpandableContent,
+    isBodyExpanded,
+    isPreviewLoading,
+    resolvedOriginalText,
+    resolvedTranslatedText,
+  ]);
+
   return (
     <article
       className={`article-entry ${isSelected ? "article-entry-selected" : ""}`.trim()}
@@ -265,13 +305,13 @@ function StoryArticleEntry({
           renderedArticleContent
         ) : (
           <div className="article-body-preview">
-            <article className="detail-item-content article-body-collapsed">
+            <article ref={collapsedBodyRef} className="detail-item-content article-body-collapsed">
               {renderedArticleBody}
             </article>
           </div>
         )}
 
-        {hasExpandableContent ? (
+        {hasExpandableContent && (isBodyExpanded || isBodyOverflowing) ? (
           <button
             type="button"
             className="article-show-more"

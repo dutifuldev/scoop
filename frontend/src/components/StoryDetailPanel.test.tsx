@@ -338,10 +338,7 @@ describe("StoryDetailPanel", () => {
     expect(screen.queryByRole("button", { name: "Copy story link for Solo Story" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Copy article link for Solo Story" }));
     expect(writeText).toHaveBeenCalledWith("https://solo.example.com/item");
-
-    await user.click(screen.getByRole("button", { name: "Show more" }));
-    expect(container.querySelector(".detail-item-content")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Add article tag" }));
 
@@ -430,10 +427,72 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
     expect(screen.getByText("i0")).toHaveClass("title-tag");
     expect(container.querySelector(".article-byline-connector")).not.toBeNull();
-    expect(screen.getAllByRole("button", { name: "Show more" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     expect(container.querySelector(".member-card-single")).toBeNull();
     expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
+  });
+
+  it("shows the article expansion control only when the body is truncated", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    );
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 640 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 240 : 0;
+      },
+    });
+
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <StoryDetailPanel
+            selectedStoryUUID="story-uuid-single"
+            selectedItemUUID=""
+            detail={makeSingleArticleDetail()}
+            availableTags={[]}
+            activeLang=""
+            isLoading={false}
+            error=""
+            onSelectItem={vi.fn()}
+            onClearSelectedItem={vi.fn()}
+          />
+        </QueryClientProvider>,
+      );
+
+      const showMore = await screen.findByRole("button", { name: "Show more" });
+      await user.click(showMore);
+      expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      }
+    }
   });
 
   it("renders Discord title source links with shared title action geometry", async () => {
@@ -553,9 +612,6 @@ Evidence:
         />
       </QueryClientProvider>,
     );
-
-    const [firstShowMore] = await screen.findAllByRole("button", { name: "Show more" });
-    await userEvent.click(firstShowMore);
 
     const link = await screen.findByRole("link", {
       name: "Ephemeral watches discussion in Discord",

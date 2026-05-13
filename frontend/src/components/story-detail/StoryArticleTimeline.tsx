@@ -1,9 +1,7 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useState } from "react";
 
-import { hasActivePersonIdentity } from "../../lib/identityFormat";
-import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
+import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
-import { ArticleTagEditor } from "./ArticleTagEditor";
 import { ArticleByline } from "./ArticleByline";
 import { ArticleTitleRow } from "./ArticleTitleRow";
 import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
@@ -34,12 +32,11 @@ export function buildMemberGroups(detail: StoryDetailResponse | null): MemberURL
   }));
 }
 
-interface StoryArticleGroupProps {
-  group: MemberURLGroup;
+interface StoryArticleTimelineProps {
+  collection: string;
+  storyUUID: string;
+  groups: MemberURLGroup[];
   selectedItemUUID: string;
-  selectedGroupKey: string;
-  expandedGroupKeys: string[];
-  isMergedStory: boolean;
   detailTextMode: "translated" | "original";
   activeLang: string;
   availableTags: Tag[];
@@ -47,20 +44,33 @@ interface StoryArticleGroupProps {
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
-  showArticleTitleActions?: boolean;
-  onExpandedGroupKeysChange: Dispatch<SetStateAction<string[]>>;
-  onSelectItem: (itemUUID: string) => void;
-  onClearSelectedItem: () => void;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
 
-export function StoryArticleGroup({
-  group,
+interface StoryArticleEntryProps {
+  collection: string;
+  storyUUID: string;
+  group: MemberURLGroup;
+  isSelected: boolean;
+  isLast: boolean;
+  isMultiArticle: boolean;
+  detailTextMode: "translated" | "original";
+  activeLang: string;
+  availableTags: Tag[];
+  tagMutationKey: string;
+  itemPreviewByUUID: Record<string, StoryArticlePreview>;
+  itemPreviewLoadingByUUID: Record<string, boolean>;
+  itemPreviewErrorByUUID: Record<string, string>;
+  onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
+  onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
+}
+
+export function StoryArticleTimeline({
+  collection,
+  storyUUID,
+  groups,
   selectedItemUUID,
-  selectedGroupKey,
-  expandedGroupKeys,
-  isMergedStory,
   detailTextMode,
   activeLang,
   availableTags,
@@ -68,16 +78,55 @@ export function StoryArticleGroup({
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
-  showArticleTitleActions = true,
-  onExpandedGroupKeysChange,
-  onSelectItem,
-  onClearSelectedItem,
   onAddArticleTag,
   onRemoveArticleTag,
-}: StoryArticleGroupProps): JSX.Element {
+}: StoryArticleTimelineProps): JSX.Element {
+  return (
+    <section className="article-timeline">
+      {groups.length === 0 ? <p className="muted">No items found for this story.</p> : null}
+      {groups.map((group, index) => (
+        <StoryArticleEntry
+          key={group.key}
+          collection={collection}
+          storyUUID={storyUUID}
+          group={group}
+          isSelected={selectedItemUUID === group.representative.story_article_uuid}
+          isLast={index === groups.length - 1}
+          isMultiArticle={groups.length > 1}
+          detailTextMode={detailTextMode}
+          activeLang={activeLang}
+          availableTags={availableTags}
+          tagMutationKey={tagMutationKey}
+          itemPreviewByUUID={itemPreviewByUUID}
+          itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
+          itemPreviewErrorByUUID={itemPreviewErrorByUUID}
+          onAddArticleTag={onAddArticleTag}
+          onRemoveArticleTag={onRemoveArticleTag}
+        />
+      ))}
+    </section>
+  );
+}
+
+function StoryArticleEntry({
+  collection,
+  storyUUID,
+  group,
+  isSelected,
+  isLast,
+  isMultiArticle,
+  detailTextMode,
+  activeLang,
+  availableTags,
+  tagMutationKey,
+  itemPreviewByUUID,
+  itemPreviewLoadingByUUID,
+  itemPreviewErrorByUUID,
+  onAddArticleTag,
+  onRemoveArticleTag,
+}: StoryArticleEntryProps): JSX.Element {
+  const [isBodyExpanded, setIsBodyExpanded] = useState(false);
   const representative = group.representative;
-  const isExpanded = !isMergedStory || expandedGroupKeys.includes(group.key);
-  const hasSelectedMember = selectedGroupKey === group.key;
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
     : "";
@@ -99,6 +148,7 @@ export function StoryArticleGroup({
   const translatedParagraphs = toParagraphs(resolvedTranslatedText);
   const hasOriginalContent = originalParagraphs.length > 0;
   const hasTranslatedContent = translatedParagraphs.length > 0;
+  const hasExpandableContent = hasOriginalContent || hasTranslatedContent;
   const isPreviewLoading = group.members.some((member) =>
     Boolean(itemPreviewLoadingByUUID[member.story_article_uuid]),
   );
@@ -132,44 +182,6 @@ export function StoryArticleGroup({
     activeLang !== "" && representativeTranslatedTitle !== ""
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
-  const routeItemUUID = hasSelectedMember ? selectedItemUUID : representative.story_article_uuid;
-  const hasRepresentativeIdentity = hasActivePersonIdentity(representative.person_identities);
-  const shouldPlaceTitleInByline = hasRepresentativeIdentity;
-  const toggleGroup = (): void => {
-    if (isExpanded) {
-      onExpandedGroupKeysChange((previous) =>
-        previous.filter((existingGroupKey) => existingGroupKey !== group.key),
-      );
-      if (hasSelectedMember) {
-        onClearSelectedItem();
-      }
-      return;
-    }
-
-    onExpandedGroupKeysChange((previous) => {
-      if (previous.includes(group.key)) {
-        return previous;
-      }
-      return [...previous, group.key];
-    });
-    onSelectItem(routeItemUUID);
-  };
-  const renderMemberTitleRow = (className = ""): JSX.Element => (
-    <ArticleTitleRow
-      article={representative}
-      title={representativeDisplayTitle}
-      canonicalURL={group.canonicalURL}
-      isExpanded={isExpanded}
-      isMergedStory={isMergedStory}
-      showArticleActions={showArticleTitleActions}
-      availableTags={availableTags}
-      tagMutationKey={tagMutationKey}
-      className={className}
-      onToggle={toggleGroup}
-      onAddArticleTag={onAddArticleTag}
-      onRemoveArticleTag={onRemoveArticleTag}
-    />
-  );
   const bylineDateTitle = [
     representative.published_at ? `Published ${formatDateTime(representative.published_at)}` : "",
     representative.matched_at ? `Ingested ${formatDateTime(representative.matched_at)}` : "",
@@ -180,10 +192,9 @@ export function StoryArticleGroup({
   ]
     .filter(Boolean)
     .join(" · ");
+
   const renderedArticleContent = (
-    <article
-      className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
-    >
+    <article className="detail-item-content article-body-expanded">
       {isPreviewLoading && !hasOriginalContent ? (
         <p className="muted">Fetching reader preview...</p>
       ) : null}
@@ -202,7 +213,7 @@ export function StoryArticleGroup({
           block.paragraphs.length > 0 ? (
             <section
               key={`${group.key}-${block.key}`}
-              className={`detail-text-block detail-text-block-${block.key} ${!isMergedStory ? "detail-text-block-single" : ""}`.trim()}
+              className={`detail-text-block detail-text-block-${block.key}`}
             >
               {showTextBlockLabels ? <p className="detail-text-label">{block.label}</p> : null}
               {block.paragraphs.map((paragraph, index) =>
@@ -223,86 +234,60 @@ export function StoryArticleGroup({
 
   return (
     <article
-      className={`member-card ${isExpanded ? "member-card-expanded" : ""} ${!isMergedStory ? "member-card-single" : ""}`.trim()}
+      className={`article-entry ${isSelected ? "article-entry-selected" : ""}`.trim()}
+      data-item-uuid={representative.story_article_uuid}
     >
-      {isMergedStory && !shouldPlaceTitleInByline ? (
-        renderMemberTitleRow()
-      ) : null}
       <ArticleByline
         identities={representative.person_identities ?? []}
         publishedAt={representative.published_at}
         source={representative.source}
         dateTitle={bylineDateTitle}
+        showConnector={isMultiArticle && !isLast}
       >
-        {shouldPlaceTitleInByline ? (
-          <div className="article-byline-title-stack">
-            {renderMemberTitleRow("member-title-row-byline")}
-          </div>
-        ) : null}
-        {isExpanded ? (
+        <div className="article-byline-title-stack">
+          <ArticleTitleRow
+            article={representative}
+            title={representativeDisplayTitle}
+            canonicalURL={group.canonicalURL}
+            collection={collection}
+            storyUUID={storyUUID}
+            showArticleActions
+            availableTags={availableTags}
+            tagMutationKey={tagMutationKey}
+            className="member-title-row-byline"
+            onAddArticleTag={onAddArticleTag}
+            onRemoveArticleTag={onRemoveArticleTag}
+          />
+        </div>
+
+        {isBodyExpanded ? (
           renderedArticleContent
         ) : (
-          <p className="member-preview member-preview-collapsed">
-            {buildMemberPreview(collapsedPreviewText)}
-          </p>
+          <div className="article-body-preview">
+            {isPreviewLoading && !hasOriginalContent ? (
+              <p className="muted">Fetching reader preview...</p>
+            ) : null}
+            {!isPreviewLoading && !hasOriginalContent && !hasTranslatedContent ? (
+              <p className="muted">No content captured for this item.</p>
+            ) : null}
+            {hasExpandableContent ? (
+              <p className="article-body-preview-text">
+                {buildMemberPreview(collapsedPreviewText)}
+              </p>
+            ) : null}
+          </div>
         )}
-      </ArticleByline>
-      {isExpanded ? (
-        <>
-          {group.members.length > 1 ? (
-            <section className="member-merge-provenance">
-              <p className="member-merge-provenance-title">Deduped items</p>
-              <ul className="member-merge-provenance-list">
-                {group.members.map((groupMember) => {
-                  const memberDecision = groupMember.dedup_decision
-                    ? groupMember.dedup_decision.toLowerCase()
-                    : "";
-                  const memberDecisionLabel = memberDecision.replace(/_/g, " ");
-                  const isSelected = selectedItemUUID === groupMember.story_article_uuid;
-                  const memberBylineDateTitle = [
-                    groupMember.published_at
-                      ? `Published ${formatDateTime(groupMember.published_at)}`
-                      : "",
-                    groupMember.matched_at ? `Ingested ${formatDateTime(groupMember.matched_at)}` : "",
-                    memberDecisionLabel ? `Decision: ${memberDecisionLabel}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
 
-                  return (
-                    <li
-                      key={groupMember.story_article_uuid}
-                      className={`member-merge-provenance-row ${isSelected ? "is-selected" : ""}`.trim()}
-                    >
-                      <button
-                        type="button"
-                        className="member-merge-provenance-link"
-                        onClick={() => onSelectItem(groupMember.story_article_uuid)}
-                      >
-                        {buildMemberSubtitle(groupMember)}
-                      </button>
-                      <ArticleByline
-                        identities={groupMember.person_identities ?? []}
-                        publishedAt={groupMember.published_at}
-                        source={groupMember.source}
-                        dateTitle={memberBylineDateTitle}
-                      />
-                      <ArticleTagEditor
-                        articleUUID={groupMember.article_uuid}
-                        currentTags={groupMember.tags ?? []}
-                        availableTags={availableTags}
-                        mutationKey={tagMutationKey}
-                        onAddTag={onAddArticleTag}
-                        onRemoveTag={onRemoveArticleTag}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : null}
-        </>
-      ) : null}
+        {hasExpandableContent ? (
+          <button
+            type="button"
+            className="article-show-more"
+            onClick={() => setIsBodyExpanded((previous) => !previous)}
+          >
+            {isBodyExpanded ? "Show less" : "Show more"}
+          </button>
+        ) : null}
+      </ArticleByline>
     </article>
   );
 }

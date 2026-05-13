@@ -220,7 +220,7 @@ describe("StoryDetailPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("auto-expands all items when a story is opened", async () => {
+  it("renders article previews when a story is opened", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -244,8 +244,8 @@ describe("StoryDetailPanel", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Fetched preview for member-1.")).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for member-2.")).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for member-1\./)).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for member-2\./)).toBeInTheDocument();
       expect(screen.queryByText("EN")).not.toBeInTheDocument();
       expect(screen.queryByText("Original")).not.toBeInTheDocument();
       expect(screen.queryByText("Fetched content by URL")).not.toBeInTheDocument();
@@ -287,7 +287,7 @@ describe("StoryDetailPanel", () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText("Fetched preview for single-member-1.");
+    await screen.findByText(/Fetched preview for single-member-1\./);
 
     expect(screen.queryByRole("heading", { name: "Solo Story" })).toBeNull();
     expect(container.querySelector(".detail-title-row")).toBeNull();
@@ -306,9 +306,8 @@ describe("StoryDetailPanel", () => {
     const singleArticleTitle = within(singleIdentityByline as HTMLElement).getByText("Solo Story");
     expect(singleArticleTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
-      screen
-        .getByText("@alice")
-        .compareDocumentPosition(singleArticleTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByText("@alice").compareDocumentPosition(singleArticleTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
     expect(screen.getByText("@alice").closest(".article-byline")).not.toBeNull();
@@ -323,9 +322,10 @@ describe("StoryDetailPanel", () => {
     expect(screen.queryByRole("button", { name: "Add article person identity" })).toBeNull();
     expect(screen.queryByLabelText("Article person identity controls")).toBeNull();
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
-    expect(container.querySelector(".member-card-single")).not.toBeNull();
-    expect(container.querySelector(".detail-item-content-single")).not.toBeNull();
-    expect(container.querySelector(".detail-text-block-single")).not.toBeNull();
+    expect(container.querySelector(".article-entry")).not.toBeNull();
+    expect(container.querySelector(".member-card-single")).toBeNull();
+    expect(container.querySelector(".detail-item-content-single")).toBeNull();
+    expect(container.querySelector(".detail-text-block-single")).toBeNull();
     expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
     expect(container.querySelector(".member-sub")).toBeNull();
@@ -336,7 +336,12 @@ describe("StoryDetailPanel", () => {
       value: { writeText },
     });
     expect(screen.queryByRole("button", { name: "Copy story link for Solo Story" })).toBeNull();
-    expect(writeText).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Copy article link for Solo Story" }));
+    expect(writeText).toHaveBeenCalledWith("https://solo.example.com/item");
+
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    expect(container.querySelector(".detail-item-content")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add article tag" }));
 
@@ -401,8 +406,9 @@ describe("StoryDetailPanel", () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText("Fetched preview for member-1.");
+    await screen.findByText(/Fetched preview for member-1\./);
 
+    expect(screen.queryByRole("heading", { name: "Story title" })).toBeNull();
     expect(screen.getByText("First item")).toBeInTheDocument();
     expect(screen.getByText("Second item")).toBeInTheDocument();
     const identityByline = screen.getByText("@alice").closest(".article-byline");
@@ -416,15 +422,17 @@ describe("StoryDetailPanel", () => {
     const inlineMemberTitle = within(identityByline as HTMLElement).getByText("First item");
     expect(inlineMemberTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
-      screen
-        .getByText("@alice")
-        .compareDocumentPosition(inlineMemberTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByText("@alice").compareDocumentPosition(inlineMemberTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.getByRole("link", { name: "a.example.com" })).toHaveClass("title-action");
     expect(screen.getByRole("link", { name: "b.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
     expect(screen.getByText("i0")).toHaveClass("title-tag");
+    expect(container.querySelector(".article-byline-connector")).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Show more" })).toHaveLength(2);
     expect(container.querySelector(".member-card-single")).toBeNull();
+    expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
   });
 
@@ -494,8 +502,8 @@ describe("StoryDetailPanel", () => {
     );
 
     await waitFor(() => {
-      const toggles = screen.getAllByRole("button", { name: /Collapse item/i });
-      expect(toggles).toHaveLength(2);
+      const titleCopyButtons = screen.getAllByRole("button", { name: /Copy article link for/i });
+      expect(titleCopyButtons).toHaveLength(2);
       expect(screen.queryByText("Deduped items")).not.toBeInTheDocument();
       expect(
         screen.getByText("glm-5: from vibe coding to agentic engineering"),
@@ -503,8 +511,8 @@ describe("StoryDetailPanel", () => {
       expect(
         screen.getByText("glm-5: 754b parameter mit-licensed model released"),
       ).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for shared-member-1.")).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for shared-member-2.")).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for shared-member-1\./)).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for shared-member-2\./)).toBeInTheDocument();
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 4000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 4000);
     });
@@ -545,6 +553,9 @@ Evidence:
         />
       </QueryClientProvider>,
     );
+
+    const [firstShowMore] = await screen.findAllByRole("button", { name: "Show more" });
+    await userEvent.click(firstShowMore);
 
     const link = await screen.findByRole("link", {
       name: "Ephemeral watches discussion in Discord",

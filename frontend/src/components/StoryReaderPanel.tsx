@@ -1,24 +1,18 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefCallback } from "react";
 
-import {
-  addArticleTag,
-  getStoryDetail,
-  removeArticleTag,
-  requestTranslation,
-} from "../api";
+import { addArticleTag, getStoryDetail, removeArticleTag, requestTranslation } from "../api";
 import { useStoryArticlePreviews } from "../hooks/useStoryArticlePreviews";
 import {
   defaultCollectionTranslationMode,
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, StoryListItem, Tag } from "../types";
-import { shouldHideSingleArticleHeader, StoryHeader } from "./story-detail/StoryHeader";
 import {
   buildMemberGroups,
-  StoryArticleGroup,
+  StoryArticleTimeline,
   type MemberURLGroup,
-} from "./story-detail/StoryArticleGroup";
+} from "./story-detail/StoryArticleTimeline";
 
 const initialReaderStoryCount = 3;
 const readerPageSize = 3;
@@ -656,12 +650,9 @@ function StoryReaderSection({
   isLoading,
   error,
   refCallback,
-  onSelectItem,
-  onClearSelectedItem,
   onTranslationStateChange,
 }: StoryReaderSectionProps): JSX.Element {
   const queryClient = useQueryClient();
-  const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
   const [detailTextMode, setDetailTextMode] = useState<"translated" | "original">(
     activeLang ? "translated" : "original",
   );
@@ -700,29 +691,10 @@ function StoryReaderSection({
     return buildMemberGroups(detail);
   }, [detail]);
 
-  const groupKeyByItemUUID = useMemo<Record<string, string>>(() => {
-    const mapping: Record<string, string> = {};
-    for (const group of memberGroups) {
-      for (const member of group.members) {
-        mapping[member.story_article_uuid] = group.key;
-      }
-    }
-    return mapping;
-  }, [memberGroups]);
-
-  const selectedGroupKey = selectedItemUUID ? (groupKeyByItemUUID[selectedItemUUID] ?? "") : "";
   const showTranslationProgress =
     sectionActiveLang !== "" &&
     isTranslating &&
     activeTranslationKeyRef.current === `${storyUUID}:${sectionActiveLang}`;
-
-  useEffect(() => {
-    if (!detail) {
-      setExpandedGroupKeys([]);
-      return;
-    }
-    setExpandedGroupKeys(memberGroups.map((group) => group.key));
-  }, [detail, memberGroups]);
 
   useEffect(() => {
     setDetailTextMode(sectionActiveLang ? "translated" : "original");
@@ -831,9 +803,6 @@ function StoryReaderSection({
     }
   }
 
-  const isMergedStory = detail ? detail.story.article_count > 1 || memberGroups.length > 1 : false;
-  const hideSingleArticleHeader = shouldHideSingleArticleHeader(detail, memberGroups);
-
   return (
     <section
       ref={refCallback}
@@ -844,17 +813,6 @@ function StoryReaderSection({
       {!isLoading && error ? <p className="muted">{error}</p> : null}
       {detail ? (
         <>
-          <StoryHeader
-            detail={detail}
-            memberGroups={memberGroups}
-            activeLang={sectionActiveLang}
-            availableTags={availableTags}
-            tagMutationKey={tagMutationKey}
-            wrapperClassName="reader-story-header"
-            onAddArticleTag={onAddArticleTag}
-            onRemoveArticleTag={onRemoveArticleTag}
-          />
-
           {sectionActiveLang ? (
             <div className="detail-text-mode-toggle" role="group" aria-label="Detail text mode">
               <button
@@ -891,36 +849,21 @@ function StoryReaderSection({
           {translationError ? <p className="banner-error">{translationError}</p> : null}
           {tagMutationError ? <p className="banner-error">{tagMutationError}</p> : null}
 
-          <section className="member-grid">
-            {memberGroups.length === 0 ? (
-              <p className="muted">No items found for this story.</p>
-            ) : null}
-            {memberGroups.map((group) => (
-              <StoryArticleGroup
-                key={group.key}
-                group={group}
-                selectedItemUUID={selectedItemUUID}
-                selectedGroupKey={selectedGroupKey}
-                expandedGroupKeys={expandedGroupKeys}
-                isMergedStory={isMergedStory}
-                detailTextMode={detailTextMode}
-                activeLang={sectionActiveLang}
-                availableTags={availableTags}
-                tagMutationKey={tagMutationKey}
-                itemPreviewByUUID={itemPreviewByUUID}
-                itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
-                itemPreviewErrorByUUID={itemPreviewErrorByUUID}
-                showArticleTitleActions={isMergedStory || hideSingleArticleHeader}
-                onExpandedGroupKeysChange={setExpandedGroupKeys}
-                onSelectItem={(itemUUID) =>
-                  onSelectItem(storyUUID, itemUUID, detail.story.collection)
-                }
-                onClearSelectedItem={() => onClearSelectedItem(storyUUID, detail.story.collection)}
-                onAddArticleTag={onAddArticleTag}
-                onRemoveArticleTag={onRemoveArticleTag}
-              />
-            ))}
-          </section>
+          <StoryArticleTimeline
+            collection={detail.story.collection}
+            storyUUID={detail.story.story_uuid}
+            groups={memberGroups}
+            selectedItemUUID={selectedItemUUID}
+            detailTextMode={detailTextMode}
+            activeLang={sectionActiveLang}
+            availableTags={availableTags}
+            tagMutationKey={tagMutationKey}
+            itemPreviewByUUID={itemPreviewByUUID}
+            itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
+            itemPreviewErrorByUUID={itemPreviewErrorByUUID}
+            onAddArticleTag={onAddArticleTag}
+            onRemoveArticleTag={onRemoveArticleTag}
+          />
         </>
       ) : null}
     </section>

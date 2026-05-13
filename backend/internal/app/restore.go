@@ -85,43 +85,27 @@ func runRestore(args []string) int {
 }
 
 func runRestoreStory(ctx context.Context, pool *db.Pool, storyUUID string, now time.Time, dryRun bool) int {
-	previewCount, err := previewStoryRestoreCount(ctx, pool, storyUUID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to preview story restore: %v\n", err)
-		return 1
-	}
-	if dryRun {
-		fmt.Printf("dry_run=true stories_affected=%d\n", previewCount)
-		return 0
-	}
-
-	affected, err := pool.RestoreStory(ctx, storyUUID, now)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to restore story: %v\n", err)
-		return 1
-	}
-	fmt.Printf("stories_affected=%d\n", affected)
-	return 0
+	return runSingleRowChange(ctx, pool, storyUUID, now, dryRun, singleRowChangeOptions{
+		affectedLabel: "stories_affected",
+		previewError:  "Failed to preview story restore",
+		applyError:    "Failed to restore story",
+		preview:       previewStoryRestoreCount,
+		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+			return pool.RestoreStory(ctx, id, now)
+		},
+	})
 }
 
 func runRestoreArticle(ctx context.Context, pool *db.Pool, articleUUID string, now time.Time, dryRun bool) int {
-	previewCount, err := previewArticleRestoreCount(ctx, pool, articleUUID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to preview article restore: %v\n", err)
-		return 1
-	}
-	if dryRun {
-		fmt.Printf("dry_run=true articles_affected=%d\n", previewCount)
-		return 0
-	}
-
-	affected, err := pool.RestoreArticle(ctx, articleUUID, now)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to restore article: %v\n", err)
-		return 1
-	}
-	fmt.Printf("articles_affected=%d\n", affected)
-	return 0
+	return runSingleRowChange(ctx, pool, articleUUID, now, dryRun, singleRowChangeOptions{
+		affectedLabel: "articles_affected",
+		previewError:  "Failed to preview article restore",
+		applyError:    "Failed to restore article",
+		preview:       previewArticleRestoreCount,
+		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+			return pool.RestoreArticle(ctx, id, now)
+		},
+	})
 }
 
 func previewStoryRestoreCount(ctx context.Context, pool *db.Pool, storyUUID string) (int64, error) {

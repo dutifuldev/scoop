@@ -1,0 +1,79 @@
+go:
+  coverage_threshold: 16.5
+  dry_max_candidates: 55
+  dry_paths:
+    - backend/cmd
+    - backend/internal
+    - backend/schema
+  dry_exclude:
+    - "**/*_test.go"
+  mutation_targets:
+    - backend/internal/language/normalize.go
+    - backend/internal/reader/preview.go
+  dependency_boundaries:
+    - from: backend/cmd/scoop
+      allow:
+        - backend/internal/app
+    - from: backend/internal/app
+      allow:
+        - backend/internal/auth
+        - backend/internal/cli
+        - backend/internal/config
+        - backend/internal/db
+        - backend/internal/globaltime
+        - backend/internal/httpapi
+        - backend/internal/ingest
+        - backend/internal/language
+        - backend/internal/logging
+        - backend/internal/pipeline
+        - backend/internal/translation
+        - backend/schema
+    - from: backend/internal/auth
+      allow: []
+    - from: backend/internal/cli
+      allow: []
+    - from: backend/internal/config
+      allow: []
+    - from: backend/internal/db
+      allow:
+        - backend/internal/config
+        - backend/internal/language
+        - backend/internal/normalize
+    - from: backend/internal/globaltime
+      allow: []
+    - from: backend/internal/httpapi
+      allow:
+        - backend/internal/auth
+        - backend/internal/db
+        - backend/internal/globaltime
+        - backend/internal/language
+        - backend/internal/reader
+        - backend/internal/translation
+    - from: backend/internal/ingest
+      allow:
+        - backend/internal/db
+        - backend/internal/globaltime
+    - from: backend/internal/langdetect
+      allow: []
+    - from: backend/internal/language
+      allow: []
+    - from: backend/internal/logging
+      allow: []
+    - from: backend/internal/normalize
+      allow: []
+    - from: backend/internal/pipeline
+      allow:
+        - backend/internal/db
+        - backend/internal/globaltime
+        - backend/internal/langdetect
+        - backend/internal/normalize
+        - backend/schema
+    - from: backend/internal/reader
+      allow: []
+    - from: backend/internal/translation
+      allow:
+        - backend/internal/db
+        - backend/internal/language
+        - backend/internal/reader
+    - from: backend/schema
+      allow: []

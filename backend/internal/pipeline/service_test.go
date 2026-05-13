@@ -5,12 +5,14 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	textnormalize "horse.fit/scoop/internal/normalize"
 )
 
 func TestNormalizeURL_StripsTrackingAndNormalizes(t *testing.T) {
 	t.Parallel()
 
-	canonical, host := normalizeURL("https://Example.COM:443/news/path/?utm_source=abc&fbclid=123&b=2&a=1")
+	canonical, host := textnormalize.URL("https://Example.COM:443/news/path/?utm_source=abc&fbclid=123&b=2&a=1")
 	if canonical != "https://example.com/news/path?a=1&b=2" {
 		t.Fatalf("unexpected canonical url: %q", canonical)
 	}
@@ -22,7 +24,7 @@ func TestNormalizeURL_StripsTrackingAndNormalizes(t *testing.T) {
 func TestNormalizeURL_Invalid(t *testing.T) {
 	t.Parallel()
 
-	canonical, host := normalizeURL("not a url")
+	canonical, host := textnormalize.URL("not a url")
 	if canonical != "" || host != "" {
 		t.Fatalf("expected empty result for invalid URL, got canonical=%q host=%q", canonical, host)
 	}

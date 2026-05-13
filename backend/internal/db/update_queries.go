@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"net/url"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
+
+	textnormalize "horse.fit/scoop/internal/normalize"
 )
 
 type UpdateStoryOptions struct {
@@ -25,15 +25,6 @@ type UpdateArticleOptions struct {
 	Source     *string
 	Collection *string
 	URL        *string
-}
-
-var updateTrackingQueryKeys = map[string]struct{}{
-	"fbclid":  {},
-	"gclid":   {},
-	"mc_cid":  {},
-	"mc_eid":  {},
-	"ref":     {},
-	"ref_src": {},
 }
 
 func (p *Pool) UpdateStory(ctx context.Context, storyUUID string, opts UpdateStoryOptions, now time.Time) error {
@@ -82,7 +73,7 @@ func (p *Pool) UpdateStory(ctx context.Context, storyUUID string, opts UpdateSto
 		if trimmed == "" {
 			return fmt.Errorf("url must not be empty")
 		}
-		canonical, _ := normalizeURL(trimmed)
+		canonical, _ := textnormalize.URL(trimmed)
 		if canonical == "" {
 			return fmt.Errorf("url must be a fully-qualified URL")
 		}
@@ -199,7 +190,7 @@ func (p *Pool) UpdateArticle(ctx context.Context, articleUUID string, opts Updat
 		if trimmed == "" {
 			return fmt.Errorf("url must not be empty")
 		}
-		normalized, host := normalizeURL(trimmed)
+		normalized, host := textnormalize.URL(trimmed)
 		if normalized == "" {
 			return fmt.Errorf("url must be a fully-qualified URL")
 		}
@@ -240,7 +231,7 @@ FOR UPDATE
 		if raw == "" {
 			return fmt.Errorf("title must not be empty")
 		}
-		normalized := normalizeText(raw)
+		normalized := textnormalize.Text(raw)
 		if normalized == "" {
 			return fmt.Errorf("title must not be empty")
 		}
@@ -344,101 +335,6 @@ WHERE article_uuid = $1::uuid
 	return nil
 }
 
-func normalizeURL(raw string) (canonical string, host string) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", ""
-	}
-
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return "", ""
-	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", ""
-	}
-
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Hostname())
-	if port := parsed.Port(); port != "" {
-		defaultPort := (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443")
-		if !defaultPort {
-			parsed.Host = parsed.Host + ":" + port
-		}
-	}
-
-	parsed.Fragment = ""
-	path := strings.TrimSpace(parsed.EscapedPath())
-	if path == "" {
-		path = "/"
-	}
-	path = strings.ReplaceAll(path, "//", "/")
-	if strings.HasSuffix(path, "/") && path != "/" {
-		path = strings.TrimSuffix(path, "/")
-	}
-	parsed.Path = path
-	parsed.RawPath = ""
-
-	q := parsed.Query()
-	for key := range q {
-		lower := strings.ToLower(key)
-		if strings.HasPrefix(lower, "utm_") {
-			q.Del(key)
-			continue
-		}
-		if _, ok := updateTrackingQueryKeys[lower]; ok {
-			q.Del(key)
-		}
-	}
-	if len(q) > 0 {
-		keys := make([]string, 0, len(q))
-		for key := range q {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-
-		reordered := url.Values{}
-		for _, key := range keys {
-			values := q[key]
-			sort.Strings(values)
-			for _, value := range values {
-				reordered.Add(key, value)
-			}
-		}
-		parsed.RawQuery = reordered.Encode()
-	} else {
-		parsed.RawQuery = ""
-	}
-
-	return parsed.String(), parsed.Hostname()
-}
-
-func normalizeText(input string) string {
-	trimmed := strings.TrimSpace(strings.ToLower(input))
-	if trimmed == "" {
-		return ""
-	}
-
-	var b strings.Builder
-	b.Grow(len(trimmed))
-	lastSpace := false
-	for _, r := range trimmed {
-		if unicode.IsSpace(r) {
-			if !lastSpace {
-				b.WriteRune(' ')
-				lastSpace = true
-			}
-			continue
-		}
-		if unicode.IsControl(r) {
-			continue
-		}
-		b.WriteRune(r)
-		lastSpace = false
-	}
-	return strings.TrimSpace(b.String())
-}
-
 func countTokens(text string) int {
 	if strings.TrimSpace(text) == "" {
 		return 0
@@ -475,7 +371,7 @@ func simhash64(text string) (uint64, bool) {
 }
 
 func tokenize(text string) []string {
-	normalized := normalizeText(text)
+	normalized := textnormalize.Text(text)
 	if normalized == "" {
 		return nil
 	}

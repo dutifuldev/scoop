@@ -65,6 +65,12 @@ jobs:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
         run: go test ./... -count=1 -timeout 5m
 
+      - name: Coverage gate
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
+        run: ./scripts/check-go-coverage.sh
+
   frontend:
     name: Frontend (TypeScript)
     runs-on: ubuntu-latest

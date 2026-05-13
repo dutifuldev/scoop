@@ -157,3 +157,127 @@ func TestValidateNewsItemPayload_MetadataInnerKeysRequired(t *testing.T) {
 		t.Fatalf("expected validation to fail when source_metadata required keys are missing")
 	}
 }
+
+func TestValidateSemantics(t *testing.T) {
+	valid := NewsItem{
+		PayloadVersion: "v1",
+		Source:         "rss",
+		SourceItemID:   "source-1",
+		Title:          "Story title",
+	}
+	canonicalURL := "https://example.com/story"
+	imageURL := "https://example.com/image.png"
+	publishedAt := "2026-02-14T10:00:00Z"
+
+	tests := []struct {
+		name string
+		item *NewsItem
+		want string
+	}{
+		{
+			name: "nil",
+			item: nil,
+			want: "payload is nil",
+		},
+		{
+			name: "blank source",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.Source = " "
+			}),
+			want: "source must not be empty",
+		},
+		{
+			name: "blank source item id",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.SourceItemID = " "
+			}),
+			want: "source_item_id must not be empty",
+		},
+		{
+			name: "blank title",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.Title = " "
+			}),
+			want: "title must not be empty",
+		},
+		{
+			name: "wrong payload version",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.PayloadVersion = "v2"
+			}),
+			want: "payload_version must be v1",
+		},
+		{
+			name: "valid URI fields and published time",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.CanonicalURL = &canonicalURL
+				item.ImageURL = &imageURL
+				item.PublishedAt = &publishedAt
+				item.Authors = []string{"Alice"}
+				item.Tags = []string{"release"}
+			}),
+		},
+		{
+			name: "blank canonical URL",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				blank := " "
+				item.CanonicalURL = &blank
+			}),
+			want: "canonical_url must not be empty",
+		},
+		{
+			name: "invalid image URL",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				invalid := "://bad"
+				item.ImageURL = &invalid
+			}),
+			want: "image_url is not a valid URI",
+		},
+		{
+			name: "invalid published at",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				invalid := "not-a-time"
+				item.PublishedAt = &invalid
+			}),
+			want: "published_at must be RFC3339",
+		},
+		{
+			name: "blank author",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.Authors = []string{"Alice", " "}
+			}),
+			want: "authors[1] must not be empty",
+		},
+		{
+			name: "blank tag",
+			item: withNewsItem(valid, func(item *NewsItem) {
+				item.Tags = []string{"ai", " "}
+			}),
+			want: "tags[1] must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSemantics(tt.item)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("validateSemantics() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validateSemantics() error = nil, want %q", tt.want)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateSemantics() error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func withNewsItem(base NewsItem, mutate func(*NewsItem)) *NewsItem {
+	item := base
+	mutate(&item)
+	return &item
+}

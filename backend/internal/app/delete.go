@@ -91,43 +91,27 @@ func runDelete(args []string) int {
 }
 
 func runDeleteStory(ctx context.Context, pool *db.Pool, storyUUID string, now time.Time, dryRun bool) int {
-	previewCount, err := previewStoryDeleteCount(ctx, pool, storyUUID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to preview story delete: %v\n", err)
-		return 1
-	}
-	if dryRun {
-		fmt.Printf("dry_run=true stories_affected=%d\n", previewCount)
-		return 0
-	}
-
-	affected, err := pool.SoftDeleteStory(ctx, storyUUID, now)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to soft delete story: %v\n", err)
-		return 1
-	}
-	fmt.Printf("stories_affected=%d\n", affected)
-	return 0
+	return runSingleRowChange(ctx, pool, storyUUID, now, dryRun, singleRowChangeOptions{
+		affectedLabel: "stories_affected",
+		previewError:  "Failed to preview story delete",
+		applyError:    "Failed to soft delete story",
+		preview:       previewStoryDeleteCount,
+		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+			return pool.SoftDeleteStory(ctx, id, now)
+		},
+	})
 }
 
 func runDeleteArticle(ctx context.Context, pool *db.Pool, articleUUID string, now time.Time, dryRun bool) int {
-	previewCount, err := previewArticleDeleteCount(ctx, pool, articleUUID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to preview article delete: %v\n", err)
-		return 1
-	}
-	if dryRun {
-		fmt.Printf("dry_run=true articles_affected=%d\n", previewCount)
-		return 0
-	}
-
-	affected, err := pool.SoftDeleteArticle(ctx, articleUUID, now)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to soft delete article: %v\n", err)
-		return 1
-	}
-	fmt.Printf("articles_affected=%d\n", affected)
-	return 0
+	return runSingleRowChange(ctx, pool, articleUUID, now, dryRun, singleRowChangeOptions{
+		affectedLabel: "articles_affected",
+		previewError:  "Failed to preview article delete",
+		applyError:    "Failed to soft delete article",
+		preview:       previewArticleDeleteCount,
+		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+			return pool.SoftDeleteArticle(ctx, id, now)
+		},
+	})
 }
 
 func runDeleteCollection(ctx context.Context, pool *db.Pool, collection string, now time.Time, dryRun bool) int {
@@ -220,6 +204,34 @@ WHERE article_uuid = $1::uuid
 		return 0, err
 	}
 	return count, nil
+}
+
+type singleRowChangeOptions struct {
+	affectedLabel string
+	previewError  string
+	applyError    string
+	preview       func(context.Context, *db.Pool, string) (int64, error)
+	apply         func(context.Context, *db.Pool, string, time.Time) (int64, error)
+}
+
+func runSingleRowChange(ctx context.Context, pool *db.Pool, id string, now time.Time, dryRun bool, opts singleRowChangeOptions) int {
+	previewCount, err := opts.preview(ctx, pool, id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", opts.previewError, err)
+		return 1
+	}
+	if dryRun {
+		fmt.Printf("dry_run=true %s=%d\n", opts.affectedLabel, previewCount)
+		return 0
+	}
+
+	affected, err := opts.apply(ctx, pool, id, now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", opts.applyError, err)
+		return 1
+	}
+	fmt.Printf("%s=%d\n", opts.affectedLabel, affected)
+	return 0
 }
 
 func previewCollectionDeleteCounts(ctx context.Context, pool *db.Pool, collection string) (db.SoftDeleteCollectionResult, error) {

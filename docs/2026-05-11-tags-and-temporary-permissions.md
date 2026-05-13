@@ -47,6 +47,7 @@ CLI-only tag-list actions are:
 - create a tag
 - rename a tag
 - change a tag color
+- change a tag highlight color
 - archive or unarchive a tag
 - delete an unused tag
 
@@ -74,9 +75,9 @@ Tag list management should start in the CLI.
 Suggested commands:
 
 - `scoop tags list`
-- `scoop tags create <tag> [--color <hex>]`
+- `scoop tags create <tag> [--color <hex>] [--highlight-color <hex>]`
 - `scoop tags rename <old-tag> <new-tag>`
-- `scoop tags update <tag> [--color <hex>]`
+- `scoop tags update <tag> [--color <hex>] [--highlight-color <hex>]`
 - `scoop tags archive <tag>`
 - `scoop tags unarchive <tag>`
 - `scoop tags delete <tag>`
@@ -151,9 +152,16 @@ Allowed tag definitions.
 - `tag`
 - `description`
 - `color`
+- `highlight_color`
 - `archived_at`
 - `created_at`
 - `updated_at`
+
+`color` controls the tag pill itself.
+
+`highlight_color` is optional. When set, it controls the visual emphasis applied to articles and stories carrying the tag. When empty, the tag does not change article or story styling.
+
+`highlight_color` should be a normal hex color. It should not encode a variant, priority, CSS class, or arbitrary style payload.
 
 ### `news.article_tags`
 
@@ -237,6 +245,16 @@ The article detail view should not allow creating new tags.
 Do not add a Tags settings page in the first version.
 
 If tag-list management is later added to the app, gate it behind roles or temporary grants.
+
+Tag pills should use `color`.
+
+Article and story emphasis should use `highlight_color`.
+
+If an article has multiple tags with `highlight_color`, use the first one after sorting by tag value. This keeps the rule deterministic without adding priority or variant fields.
+
+Stories should derive their highlight from the tags on their articles using the same rule over the aggregated tag set.
+
+The first UI treatment should be restrained: a colored left rail and, if needed, a very subtle background tint derived from `highlight_color`. Do not hardcode special behavior for specific tag names.
 
 ## Implementation Order
 

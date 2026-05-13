@@ -131,6 +131,10 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --scoop-text-highlight: #1d9bf0;
+  }
+
   * {
     @apply box-border;
   }

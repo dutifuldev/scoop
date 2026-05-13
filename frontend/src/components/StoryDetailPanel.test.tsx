@@ -220,7 +220,7 @@ describe("StoryDetailPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("auto-expands all items when a story is opened", async () => {
+  it("renders article previews when a story is opened", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -244,8 +244,8 @@ describe("StoryDetailPanel", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Fetched preview for member-1.")).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for member-2.")).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for member-1\./)).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for member-2\./)).toBeInTheDocument();
       expect(screen.queryByText("EN")).not.toBeInTheDocument();
       expect(screen.queryByText("Original")).not.toBeInTheDocument();
       expect(screen.queryByText("Fetched content by URL")).not.toBeInTheDocument();
@@ -287,7 +287,7 @@ describe("StoryDetailPanel", () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText("Fetched preview for single-member-1.");
+    await screen.findByText(/Fetched preview for single-member-1\./);
 
     expect(screen.queryByRole("heading", { name: "Solo Story" })).toBeNull();
     expect(container.querySelector(".detail-title-row")).toBeNull();
@@ -306,9 +306,8 @@ describe("StoryDetailPanel", () => {
     const singleArticleTitle = within(singleIdentityByline as HTMLElement).getByText("Solo Story");
     expect(singleArticleTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
-      screen
-        .getByText("@alice")
-        .compareDocumentPosition(singleArticleTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByText("@alice").compareDocumentPosition(singleArticleTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
     expect(screen.getByText("@alice").closest(".article-byline")).not.toBeNull();
@@ -323,9 +322,10 @@ describe("StoryDetailPanel", () => {
     expect(screen.queryByRole("button", { name: "Add article person identity" })).toBeNull();
     expect(screen.queryByLabelText("Article person identity controls")).toBeNull();
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
-    expect(container.querySelector(".member-card-single")).not.toBeNull();
-    expect(container.querySelector(".detail-item-content-single")).not.toBeNull();
-    expect(container.querySelector(".detail-text-block-single")).not.toBeNull();
+    expect(container.querySelector(".article-entry")).not.toBeNull();
+    expect(container.querySelector(".member-card-single")).toBeNull();
+    expect(container.querySelector(".detail-item-content-single")).toBeNull();
+    expect(container.querySelector(".detail-text-block-single")).toBeNull();
     expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
     expect(container.querySelector(".member-sub")).toBeNull();
@@ -336,7 +336,9 @@ describe("StoryDetailPanel", () => {
       value: { writeText },
     });
     expect(screen.queryByRole("button", { name: "Copy story link for Solo Story" })).toBeNull();
-    expect(writeText).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Copy article link for Solo Story" }));
+    expect(writeText).toHaveBeenCalledWith("https://solo.example.com/item");
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Add article tag" }));
 
@@ -401,8 +403,9 @@ describe("StoryDetailPanel", () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText("Fetched preview for member-1.");
+    await screen.findByText(/Fetched preview for member-1\./);
 
+    expect(screen.queryByRole("heading", { name: "Story title" })).toBeNull();
     expect(screen.getByText("First item")).toBeInTheDocument();
     expect(screen.getByText("Second item")).toBeInTheDocument();
     const identityByline = screen.getByText("@alice").closest(".article-byline");
@@ -416,16 +419,141 @@ describe("StoryDetailPanel", () => {
     const inlineMemberTitle = within(identityByline as HTMLElement).getByText("First item");
     expect(inlineMemberTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
-      screen
-        .getByText("@alice")
-        .compareDocumentPosition(inlineMemberTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      screen.getByText("@alice").compareDocumentPosition(inlineMemberTitle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.getByRole("link", { name: "a.example.com" })).toHaveClass("title-action");
     expect(screen.getByRole("link", { name: "b.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".member-title-row .member-tag-tools-title")).not.toBeNull();
     expect(screen.getByText("i0")).toHaveClass("title-tag");
+    expect(container.querySelector(".article-byline-connector")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     expect(container.querySelector(".member-card-single")).toBeNull();
+    expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
+  });
+
+  it("shows the article expansion control only when the body is truncated", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    );
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 640 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 240 : 0;
+      },
+    });
+
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <StoryDetailPanel
+            selectedStoryUUID="story-uuid-single"
+            selectedItemUUID=""
+            detail={makeSingleArticleDetail()}
+            availableTags={[]}
+            activeLang=""
+            isLoading={false}
+            error=""
+            onSelectItem={vi.fn()}
+            onClearSelectedItem={vi.fn()}
+          />
+        </QueryClientProvider>,
+      );
+
+      const showMore = await screen.findByRole("button", { name: "Show more" });
+      await user.click(showMore);
+      expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      }
+    }
+  });
+
+  it("does not show the article expansion control for tiny measurement differences", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    );
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 246 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 240 : 0;
+      },
+    });
+
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <StoryDetailPanel
+            selectedStoryUUID="story-uuid-single"
+            selectedItemUUID=""
+            detail={makeSingleArticleDetail()}
+            availableTags={[]}
+            activeLang=""
+            isLoading={false}
+            error=""
+            onSelectItem={vi.fn()}
+            onClearSelectedItem={vi.fn()}
+          />
+        </QueryClientProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+      });
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      }
+    }
   });
 
   it("renders Discord title source links with shared title action geometry", async () => {
@@ -494,8 +622,8 @@ describe("StoryDetailPanel", () => {
     );
 
     await waitFor(() => {
-      const toggles = screen.getAllByRole("button", { name: /Collapse item/i });
-      expect(toggles).toHaveLength(2);
+      const titleCopyButtons = screen.getAllByRole("button", { name: /Copy article link for/i });
+      expect(titleCopyButtons).toHaveLength(2);
       expect(screen.queryByText("Deduped items")).not.toBeInTheDocument();
       expect(
         screen.getByText("glm-5: from vibe coding to agentic engineering"),
@@ -503,8 +631,8 @@ describe("StoryDetailPanel", () => {
       expect(
         screen.getByText("glm-5: 754b parameter mit-licensed model released"),
       ).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for shared-member-1.")).toBeInTheDocument();
-      expect(screen.getByText("Fetched preview for shared-member-2.")).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for shared-member-1\./)).toBeInTheDocument();
+      expect(screen.getByText(/Fetched preview for shared-member-2\./)).toBeInTheDocument();
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-1", 4000);
       expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("shared-member-2", 4000);
     });

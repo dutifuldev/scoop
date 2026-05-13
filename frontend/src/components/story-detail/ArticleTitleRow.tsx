@@ -1,20 +1,20 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 import type { StoryArticle, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
-import { TitleActions, TitleSourceLink } from "./TitleActions";
+import { buildStoryShareURL, TitleActions, TitleSourceLink } from "./TitleActions";
+import { copyTextToClipboard } from "./storyTextRendering";
 
 interface ArticleTitleRowProps {
   article: StoryArticle;
   title: string;
   canonicalURL: string;
-  isExpanded: boolean;
-  isMergedStory: boolean;
+  collection: string;
+  storyUUID: string;
   showArticleActions: boolean;
   availableTags: Tag[];
   tagMutationKey: string;
   className?: string;
-  onToggle?: () => void;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
@@ -23,40 +23,53 @@ export function ArticleTitleRow({
   article,
   title,
   canonicalURL,
-  isExpanded,
-  isMergedStory,
+  collection,
+  storyUUID,
   showArticleActions,
   availableTags,
   tagMutationKey,
   className = "",
-  onToggle,
   onAddArticleTag,
   onRemoveArticleTag,
 }: ArticleTitleRowProps): JSX.Element {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const displayTitle = title || "(no title)";
+  const normalizedCanonicalURL = canonicalURL.trim();
+  const copyTitle =
+    copyState === "copied"
+      ? "Copied article link"
+      : copyState === "failed"
+        ? "Failed to copy article link"
+        : "Copy article link";
+
+  async function copyArticleLink(): Promise<void> {
+    const link = normalizedCanonicalURL || buildStoryShareURL(collection, storyUUID);
+    if (!link) {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+      return;
+    }
+
+    const copied = await copyTextToClipboard(link);
+    setCopyState(copied ? "copied" : "failed");
+    window.setTimeout(() => setCopyState("idle"), 1400);
+  }
 
   return (
     <div className={`member-title-row ${className}`.trim()}>
       <TitleActions className="member-title-cluster">
-        {isMergedStory ? (
-          <button
-            type="button"
-            className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
-            onClick={onToggle}
-            aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${displayTitle}`}
-          >
-            <p className="member-head">{displayTitle}</p>
-            {isExpanded ? (
-              <ChevronDown className="member-toggle-icon" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="member-toggle-icon" aria-hidden="true" />
-            )}
-          </button>
-        ) : (
-          <p className="member-head member-head-static">{displayTitle}</p>
-        )}
-        {canonicalURL ? <TitleSourceLink url={canonicalURL} /> : null}
+        <button
+          type="button"
+          className={`member-title-copy ${copyState !== "idle" ? "is-active" : ""}`.trim()}
+          onClick={() => {
+            void copyArticleLink();
+          }}
+          aria-label={`Copy article link for ${displayTitle}`}
+          title={copyTitle}
+        >
+          <span className="member-head">{displayTitle}</span>
+        </button>
+        {normalizedCanonicalURL ? <TitleSourceLink url={normalizedCanonicalURL} /> : null}
         {showArticleActions ? (
           <ArticleTagEditor
             articleUUID={article.article_uuid}

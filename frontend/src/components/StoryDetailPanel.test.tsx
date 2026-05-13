@@ -194,6 +194,7 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             tag_uuid: "tag-uuid-i0",
             tag: "i0",
             color: "#f4212e",
+            highlight_color: "#faa61a",
             created_at: "2026-02-14T09:00:00Z",
             updated_at: "2026-02-14T09:00:00Z",
           },
@@ -321,7 +322,12 @@ describe("StoryDetailPanel", () => {
     expect(screen.queryByRole("button", { name: "Add article person identity" })).toBeNull();
     expect(screen.queryByLabelText("Article person identity controls")).toBeNull();
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
-    expect(container.querySelector(".article-entry")).not.toBeNull();
+    const highlightedArticle = container.querySelector(".article-entry");
+    expect(highlightedArticle).not.toBeNull();
+    expect(highlightedArticle).toHaveClass("article-entry-highlighted");
+    expect(
+      (highlightedArticle as HTMLElement).style.getPropertyValue("--tag-highlight-color"),
+    ).toBe("#faa61a");
     expect(container.querySelector(".member-card-single")).toBeNull();
     expect(container.querySelector(".detail-item-content-single")).toBeNull();
     expect(container.querySelector(".detail-text-block-single")).toBeNull();

@@ -96,11 +96,12 @@ func runTagsList(args []string) int {
 		rows = append(rows, []string{
 			tag.Tag,
 			pointerStringOrEmpty(tag.Color),
+			pointerStringOrEmpty(tag.HighlightColor),
 			formatUTCTimestampPtr(tag.ArchivedAt),
 			formatUTCTimestamp(tag.CreatedAt),
 		})
 	}
-	if err := writeTable([]string{"tag", "color", "archived_at", "created_at"}, rows); err != nil {
+	if err := writeTable([]string{"tag", "color", "highlight_color", "archived_at", "created_at"}, rows); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
 		return 1
 	}
@@ -121,6 +122,7 @@ func runTagsCreate(args []string) int {
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
 	description := fs.String("description", "", "Description")
 	color := fs.String("color", "", "Tag color as #RRGGBB")
+	highlightColor := fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -151,10 +153,15 @@ func runTagsCreate(args []string) int {
 	if *color != "" {
 		colorPtr = color
 	}
+	var highlightColorPtr *string
+	if *highlightColor != "" {
+		highlightColorPtr = highlightColor
+	}
 	tag, err := pool.CreateTag(ctx, db.UpsertTagOptions{
-		Slug:        slug,
-		Description: descriptionPtr,
-		Color:       colorPtr,
+		Slug:           slug,
+		Description:    descriptionPtr,
+		Color:          colorPtr,
+		HighlightColor: highlightColorPtr,
 	}, globaltime.UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create tag: %v\n", err)
@@ -199,6 +206,7 @@ func runTagsUpdate(args []string) int {
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
 	description := fs.String("description", "", "Description")
 	color := fs.String("color", "", "Tag color as #RRGGBB")
+	highlightColor := fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -211,6 +219,9 @@ func runTagsUpdate(args []string) int {
 	}
 	if *color != "" {
 		opts.Color = color
+	}
+	if *highlightColor != "" {
+		opts.HighlightColor = highlightColor
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "too many positional arguments")
@@ -401,9 +412,10 @@ func printTagResult(tag *db.TagRecord, rawFormat string) int {
 	rows := [][]string{{
 		tag.Tag,
 		pointerStringOrEmpty(tag.Color),
+		pointerStringOrEmpty(tag.HighlightColor),
 		formatUTCTimestampPtr(tag.ArchivedAt),
 	}}
-	if err := writeTable([]string{"tag", "color", "archived_at"}, rows); err != nil {
+	if err := writeTable([]string{"tag", "color", "highlight_color", "archived_at"}, rows); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
 		return 1
 	}
@@ -413,9 +425,9 @@ func printTagResult(tag *db.TagRecord, rawFormat string) int {
 func printTagsUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  scoop tags list [--include-archived] [--format table|json]")
-	fmt.Fprintln(os.Stderr, "  scoop tags create <tag> [--description <text>] [--color <hex>]")
+	fmt.Fprintln(os.Stderr, "  scoop tags create <tag> [--description <text>] [--color <hex>] [--highlight-color <hex>]")
 	fmt.Fprintln(os.Stderr, "  scoop tags rename <old-tag> <new-tag>")
-	fmt.Fprintln(os.Stderr, "  scoop tags update <tag> [--description <text>] [--color <hex>]")
+	fmt.Fprintln(os.Stderr, "  scoop tags update <tag> [--description <text>] [--color <hex>] [--highlight-color <hex>]")
 	fmt.Fprintln(os.Stderr, "  scoop tags archive <tag>")
 	fmt.Fprintln(os.Stderr, "  scoop tags unarchive <tag>")
 	fmt.Fprintln(os.Stderr, "  scoop tags delete <tag>")

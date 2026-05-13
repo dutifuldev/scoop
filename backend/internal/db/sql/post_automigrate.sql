@@ -606,6 +606,16 @@ BEGIN
 	IF NOT EXISTS (
 		SELECT 1
 		FROM pg_constraint
+		WHERE conname = 'tags_highlight_color_check'
+			AND conrelid = 'news.tags'::regclass
+	) THEN
+		ALTER TABLE news.tags
+			ADD CONSTRAINT tags_highlight_color_check CHECK (highlight_color IS NULL OR highlight_color ~ '^#[0-9a-fA-F]{6}$');
+	END IF;
+
+	IF NOT EXISTS (
+		SELECT 1
+		FROM pg_constraint
 		WHERE conname = 'article_embeddings_model_name_check'
 			AND conrelid = 'news.article_embeddings'::regclass
 	) THEN

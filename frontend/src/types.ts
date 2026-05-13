@@ -27,6 +27,7 @@ export interface Tag {
   tag: string;
   description?: string | null;
   color?: string | null;
+  highlight_color?: string | null;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;

@@ -256,7 +256,7 @@
   }
 
   .reader-story-section {
-    @apply border-b border-panel-500/70 pb-1;
+    @apply border-b border-panel-500/70;
     scroll-margin-top: 0.75rem;
   }
 

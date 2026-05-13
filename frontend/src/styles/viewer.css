@@ -291,13 +291,7 @@
 
   .story-card-highlighted {
     border-color: color-mix(in srgb, var(--tag-highlight-color) 34%, #2f3336);
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--tag-highlight-color) 18%, transparent),
-        transparent 42%
-      ),
-      color-mix(in srgb, var(--tag-highlight-color) 6%, #16181c);
+    background: color-mix(in srgb, var(--tag-highlight-color) 8%, #16181c);
     box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
@@ -497,13 +491,7 @@
   }
 
   .article-entry-highlighted {
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--tag-highlight-color) 13%, transparent),
-        transparent 48%
-      ),
-      transparent;
+    background: color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
     box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
@@ -1026,13 +1014,7 @@
 
   .app-root-viewer .story-card-highlighted {
     border-color: color-mix(in srgb, var(--tag-highlight-color) 22%, transparent);
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--tag-highlight-color) 15%, transparent),
-        transparent 46%
-      ),
-      transparent;
+    background: color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
     box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 
@@ -1046,13 +1028,7 @@
 
   .app-root-viewer .story-card-highlighted.active {
     border-color: color-mix(in srgb, var(--tag-highlight-color) 28%, transparent);
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--tag-highlight-color) 18%, transparent),
-        transparent 46%
-      ),
-      #16181c;
+    background: color-mix(in srgb, var(--tag-highlight-color) 9%, #16181c);
     box-shadow: inset 3px 0 0 var(--tag-highlight-color);
   }
 

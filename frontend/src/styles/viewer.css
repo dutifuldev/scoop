@@ -486,7 +486,9 @@
 
   .article-entry-highlighted {
     background: color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
-    border-left: 3px solid var(--tag-highlight-color);
+    box-shadow:
+      0 -1px 0 color-mix(in srgb, var(--tag-highlight-color) 7%, transparent),
+      0 1px 0 color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
   }
 
   .article-entry::before,

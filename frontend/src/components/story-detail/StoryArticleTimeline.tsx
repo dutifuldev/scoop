@@ -1,36 +1,16 @@
 import { useState } from "react";
 
 import { formatDateTime } from "../../lib/viewerFormat";
-import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
+import type { StoryArticlePreview, Tag } from "../../types";
 import { ArticleByline } from "./ArticleByline";
 import { ArticleTitleRow } from "./ArticleTitleRow";
+import {
+  collapsedArticleTextMaxChars,
+  truncateArticleTextBlocks,
+  type ArticleTextBlock,
+} from "./storyArticleText";
+import type { MemberURLGroup } from "./storyMemberGroups";
 import { renderTextBlock, toParagraphs } from "./storyTextRendering";
-
-export interface MemberURLGroup {
-  key: string;
-  canonicalURL: string;
-  members: StoryArticle[];
-  representative: StoryArticle;
-  sourceCount: number;
-}
-
-export function memberGroupKey(member: StoryArticle): string {
-  return `member:${member.story_article_uuid}`;
-}
-
-export function buildMemberGroups(detail: StoryDetailResponse | null): MemberURLGroup[] {
-  if (!detail) {
-    return [];
-  }
-
-  return detail.members.map((member) => ({
-    key: memberGroupKey(member),
-    canonicalURL: member.canonical_url?.trim() ?? "",
-    members: [member],
-    representative: member,
-    sourceCount: 1,
-  }));
-}
 
 interface StoryArticleTimelineProps {
   collection: string;
@@ -64,81 +44,6 @@ interface StoryArticleEntryProps {
   itemPreviewErrorByUUID: Record<string, string>;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
-}
-
-interface ArticleTextBlock {
-  key: string;
-  paragraphs: string[];
-  label: string;
-}
-
-interface ArticleBodyModel {
-  blocks: ArticleTextBlock[];
-  isTruncated: boolean;
-}
-
-const collapsedArticleTextMaxChars = 3200;
-const truncationSuffix = "...";
-
-function runeLength(value: string): number {
-  return Array.from(value).length;
-}
-
-function truncateRunes(value: string, maxChars: number): string {
-  if (maxChars <= truncationSuffix.length) {
-    return truncationSuffix;
-  }
-
-  const runes = Array.from(value);
-  if (runes.length <= maxChars) {
-    return value;
-  }
-
-  return `${runes.slice(0, maxChars - truncationSuffix.length).join("").trimEnd()}${truncationSuffix}`;
-}
-
-function truncateArticleTextBlocks(blocks: ArticleTextBlock[], maxChars: number): ArticleBodyModel {
-  let remainingChars = maxChars;
-  let isTruncated = false;
-  const nextBlocks: ArticleTextBlock[] = [];
-
-  for (const block of blocks) {
-    if (remainingChars <= 0) {
-      isTruncated = true;
-      break;
-    }
-
-    const nextParagraphs: string[] = [];
-
-    for (const paragraph of block.paragraphs) {
-      const paragraphLength = runeLength(paragraph);
-      const paragraphSeparatorLength = nextParagraphs.length > 0 ? 2 : 0;
-      const neededLength = paragraphLength + paragraphSeparatorLength;
-
-      if (neededLength <= remainingChars) {
-        nextParagraphs.push(paragraph);
-        remainingChars -= neededLength;
-        continue;
-      }
-
-      const availableForParagraph = Math.max(0, remainingChars - paragraphSeparatorLength);
-      if (availableForParagraph > truncationSuffix.length) {
-        nextParagraphs.push(truncateRunes(paragraph, availableForParagraph));
-      }
-      isTruncated = true;
-      break;
-    }
-
-    if (nextParagraphs.length > 0) {
-      nextBlocks.push({ ...block, paragraphs: nextParagraphs });
-    }
-
-    if (isTruncated) {
-      break;
-    }
-  }
-
-  return { blocks: isTruncated ? nextBlocks : blocks, isTruncated };
 }
 
 export function StoryArticleTimeline({

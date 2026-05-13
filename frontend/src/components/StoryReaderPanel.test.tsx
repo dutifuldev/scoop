@@ -92,8 +92,6 @@ function renderReader(stories: StoryListItem[], onScrollTargetSettled = vi.fn())
         readerStateKey="test-reader-state"
         onLoadNextStoryPage={vi.fn()}
         onActiveStoryChange={vi.fn()}
-        onSelectItem={vi.fn()}
-        onClearSelectedItem={vi.fn()}
         onTranslationStateChange={vi.fn()}
         onScrollTargetSettled={onScrollTargetSettled}
       />
@@ -165,8 +163,6 @@ describe("StoryReaderPanel", () => {
           readerStateKey="test-reader-state"
           onLoadNextStoryPage={vi.fn()}
           onActiveStoryChange={vi.fn()}
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
           onTranslationStateChange={vi.fn()}
           onScrollTargetSettled={onScrollTargetSettled}
         />

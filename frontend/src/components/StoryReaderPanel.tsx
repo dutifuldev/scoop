@@ -1,18 +1,17 @@
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefCallback } from "react";
 
-import { addArticleTag, getStoryDetail, removeArticleTag, requestTranslation } from "../api";
-import { useStoryArticlePreviews } from "../hooks/useStoryArticlePreviews";
+import { getStoryDetail } from "../api";
+import {
+  storyDetailQueryKey,
+  useStoryArticleDetailController,
+} from "../hooks/useStoryArticleDetailController";
 import {
   defaultCollectionTranslationMode,
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, StoryListItem, Tag } from "../types";
-import {
-  buildMemberGroups,
-  StoryArticleTimeline,
-  type MemberURLGroup,
-} from "./story-detail/StoryArticleTimeline";
+import { StoryArticleTimeline } from "./story-detail/StoryArticleTimeline";
 
 const initialReaderStoryCount = 3;
 const readerPageSize = 3;
@@ -33,8 +32,6 @@ interface StoryReaderPanelProps {
   readerStateKey: string;
   onLoadNextStoryPage: () => void;
   onActiveStoryChange: (storyUUID: string) => void;
-  onSelectItem: (storyUUID: string, itemUUID: string, collection?: string) => void;
-  onClearSelectedItem: (storyUUID: string, collection?: string) => void;
   onTranslationStateChange?: (storyUUID: string, isTranslating: boolean) => void;
   onScrollTargetSettled?: (storyUUID: string) => void;
 }
@@ -92,10 +89,6 @@ function writeStoredReaderState(key: string, state: StoredReaderState): void {
   }
 }
 
-function storyDetailQueryKey(storyUUID: string, language: string): [string, string, string] {
-  return ["story-detail", storyUUID, language];
-}
-
 function buildReaderStoryUUIDs(stories: StoryListItem[], syntheticStoryUUID: string): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -131,8 +124,6 @@ export function StoryReaderPanel({
   readerStateKey,
   onLoadNextStoryPage,
   onActiveStoryChange,
-  onSelectItem,
-  onClearSelectedItem,
   onTranslationStateChange,
   onScrollTargetSettled,
 }: StoryReaderPanelProps): JSX.Element {
@@ -606,8 +597,6 @@ export function StoryReaderPanel({
               isActive={isActive}
               isLoading={Boolean(query?.isPending)}
               error={query?.error instanceof Error ? query.error.message : ""}
-              onSelectItem={onSelectItem}
-              onClearSelectedItem={onClearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}
             />
           );
@@ -635,8 +624,6 @@ interface StoryReaderSectionProps {
   isLoading: boolean;
   error: string;
   refCallback: RefCallback<HTMLElement>;
-  onSelectItem: (storyUUID: string, itemUUID: string, collection?: string) => void;
-  onClearSelectedItem: (storyUUID: string, collection?: string) => void;
   onTranslationStateChange?: (storyUUID: string, isTranslating: boolean) => void;
 }
 
@@ -652,19 +639,6 @@ function StoryReaderSection({
   refCallback,
   onTranslationStateChange,
 }: StoryReaderSectionProps): JSX.Element {
-  const queryClient = useQueryClient();
-  const [detailTextMode, setDetailTextMode] = useState<"translated" | "original">(
-    activeLang ? "translated" : "original",
-  );
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [translationError, setTranslationError] = useState("");
-  const [tagMutationKey, setTagMutationKey] = useState("");
-  const [tagMutationError, setTagMutationError] = useState("");
-  const translationRequestedRef = useRef("");
-  const activeTranslationKeyRef = useRef("");
-  const { itemPreviewByUUID, itemPreviewLoadingByUUID, itemPreviewErrorByUUID } =
-    useStoryArticlePreviews(detail);
-
   const sectionActiveLang = useMemo(() => {
     if (!detail) {
       return "";
@@ -674,134 +648,26 @@ function StoryReaderSection({
     return isCollectionTranslationEnabled(mode) ? activeLang : "";
   }, [activeLang, detail]);
 
-  const hasPendingTranslations = useMemo(() => {
-    if (!sectionActiveLang || !detail) {
-      return false;
-    }
-
-    const translatedTitle = (detail.story.translated_title || "").trim();
-    const hasUntranslatedBody = detail.members.some((member) => {
-      const mode = member.translation_mode ?? defaultCollectionTranslationMode(member.collection);
-      return isCollectionTranslationEnabled(mode) && !(member.translated_text || "").trim();
-    });
-    return translatedTitle === "" || hasUntranslatedBody;
-  }, [detail, sectionActiveLang]);
-
-  const memberGroups = useMemo<MemberURLGroup[]>(() => {
-    return buildMemberGroups(detail);
-  }, [detail]);
-
-  const showTranslationProgress =
-    sectionActiveLang !== "" &&
-    isTranslating &&
-    activeTranslationKeyRef.current === `${storyUUID}:${sectionActiveLang}`;
-
-  useEffect(() => {
-    setDetailTextMode(sectionActiveLang ? "translated" : "original");
-  }, [sectionActiveLang]);
-
-  useEffect(() => {
-    setTranslationError("");
-  }, [storyUUID, sectionActiveLang]);
-
-  useEffect(() => {
-    if (!isActive || !sectionActiveLang || !detail || !hasPendingTranslations) {
-      return;
-    }
-
-    const reqKey = `${storyUUID}:${sectionActiveLang}`;
-    if (translationRequestedRef.current === reqKey) {
-      return;
-    }
-    translationRequestedRef.current = reqKey;
-    activeTranslationKeyRef.current = reqKey;
-    setTranslationError("");
-    setIsTranslating(true);
-    onTranslationStateChange?.(storyUUID, true);
-
-    void requestTranslation(storyUUID, sectionActiveLang)
-      .then(() =>
-        Promise.all([
-          queryClient.invalidateQueries({
-            queryKey: storyDetailQueryKey(storyUUID, sectionActiveLang),
-            exact: true,
-          }),
-          queryClient.invalidateQueries({ queryKey: ["stories"] }),
-        ]).then(() =>
-          Promise.all([
-            queryClient.refetchQueries({
-              queryKey: storyDetailQueryKey(storyUUID, sectionActiveLang),
-              exact: true,
-              type: "active",
-            }),
-            queryClient.refetchQueries({ queryKey: ["stories"], type: "active" }),
-          ]),
-        ),
-      )
-      .catch((err) => {
-        translationRequestedRef.current = "";
-        setTranslationError(err instanceof Error ? err.message : "Failed to translate story.");
-      })
-      .finally(() => {
-        if (activeTranslationKeyRef.current === reqKey) {
-          activeTranslationKeyRef.current = "";
-          setIsTranslating(false);
-        }
-        onTranslationStateChange?.(storyUUID, false);
-      });
-  }, [
-    detail,
-    hasPendingTranslations,
-    isActive,
-    onTranslationStateChange,
-    queryClient,
-    sectionActiveLang,
+  const {
+    detailTextMode,
+    setDetailTextMode,
+    translationError,
+    tagMutationKey,
+    tagMutationError,
+    showTranslationProgress,
+    memberGroups,
+    itemPreviewByUUID,
+    itemPreviewLoadingByUUID,
+    itemPreviewErrorByUUID,
+    onAddArticleTag,
+    onRemoveArticleTag,
+  } = useStoryArticleDetailController({
     storyUUID,
-  ]);
-
-  async function refreshTagsAfterMutation(): Promise<void> {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["story-detail", storyUUID] }),
-      queryClient.invalidateQueries({ queryKey: ["stories"] }),
-    ]);
-  }
-
-  async function onAddArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
-    if (!articleUUID || !tagSlug || tagSlug === "__add_tag__") {
-      return;
-    }
-
-    const mutationKey = `${articleUUID}:${tagSlug}:add`;
-    setTagMutationKey(mutationKey);
-    setTagMutationError("");
-    try {
-      await addArticleTag(articleUUID, tagSlug);
-      await refreshTagsAfterMutation();
-    } catch (err) {
-      setTagMutationError(err instanceof Error ? err.message : "Failed to add tag.");
-      throw err;
-    } finally {
-      setTagMutationKey("");
-    }
-  }
-
-  async function onRemoveArticleTag(articleUUID: string, tagSlug: string): Promise<void> {
-    if (!articleUUID || !tagSlug) {
-      return;
-    }
-
-    const mutationKey = `${articleUUID}:${tagSlug}:remove`;
-    setTagMutationKey(mutationKey);
-    setTagMutationError("");
-    try {
-      await removeArticleTag(articleUUID, tagSlug);
-      await refreshTagsAfterMutation();
-    } catch (err) {
-      setTagMutationError(err instanceof Error ? err.message : "Failed to remove tag.");
-    } finally {
-      setTagMutationKey("");
-    }
-  }
+    detail,
+    activeLang: sectionActiveLang,
+    isTranslationActive: isActive,
+    onTranslationStateChange,
+  });
 
   return (
     <section

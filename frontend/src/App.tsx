@@ -315,40 +315,6 @@ export function StoryViewerPage(): JSX.Element {
     navigateToStoryPath(collection, storyUUID);
   }
 
-  function goToItem(storyUUID: string, itemUUID: string, collectionHint?: string): void {
-    if (!storyUUID || !itemUUID) {
-      return;
-    }
-
-    const story = stories.find((row) => row.story_uuid === storyUUID);
-    const collection = (
-      story?.collection ||
-      collectionHint ||
-      routeCollection ||
-      filters.collection ||
-      ""
-    ).trim();
-    clearPassiveStoryURLTimer();
-    navigateToStoryPath(collection, storyUUID, itemUUID);
-  }
-
-  function clearSelectedItem(storyUUID: string, collectionHint?: string): void {
-    if (!storyUUID) {
-      return;
-    }
-
-    const story = stories.find((row) => row.story_uuid === storyUUID);
-    const collection = (
-      story?.collection ||
-      collectionHint ||
-      routeCollection ||
-      filters.collection ||
-      ""
-    ).trim();
-    clearPassiveStoryURLTimer();
-    navigateToStoryPath(collection, storyUUID);
-  }
-
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const trimmed = searchInput.trim();
@@ -645,8 +611,6 @@ export function StoryViewerPage(): JSX.Element {
               readerStateKey={readerStateKey}
               onLoadNextStoryPage={fetchNextStoriesPage}
               onActiveStoryChange={onReaderActiveStoryChange}
-              onSelectItem={goToItem}
-              onClearSelectedItem={clearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}
               onScrollTargetSettled={onReaderScrollTargetSettled}
             />

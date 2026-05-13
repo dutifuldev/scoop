@@ -1,13 +1,7 @@
-import { useState, type MouseEventHandler, type ReactNode } from "react";
+import type { CSSProperties, MouseEventHandler, ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
-import type { CSSProperties } from "react";
 
-import {
-  copyTextToClipboard,
-  DiscordMessageLink,
-  discordMessagePattern,
-  labelForURL,
-} from "./storyTextRendering";
+import { DiscordMessageLink, discordMessagePattern, labelForURL } from "./storyTextRendering";
 
 interface TitleActionsProps {
   children: ReactNode;
@@ -131,54 +125,6 @@ export function buildStoryShareURL(collection: string, storyUUID: string): strin
   }
 
   return new URL(path, window.location.origin).toString();
-}
-
-interface StoryTitleCopyButtonProps {
-  title: string;
-  collection: string;
-  storyUUID: string;
-}
-
-export function StoryTitleCopyButton({
-  title,
-  collection,
-  storyUUID,
-}: StoryTitleCopyButtonProps): JSX.Element {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  const displayTitle = title || "(untitled)";
-  const statusText =
-    copyState === "copied"
-      ? "Copied story link"
-      : copyState === "failed"
-        ? "Failed to copy story link"
-        : "Copy story link";
-
-  async function copyStoryLink(): Promise<void> {
-    const shareURL = buildStoryShareURL(collection, storyUUID);
-    if (!shareURL) {
-      setCopyState("failed");
-      window.setTimeout(() => setCopyState("idle"), 1400);
-      return;
-    }
-
-    const copied = await copyTextToClipboard(shareURL);
-    setCopyState(copied ? "copied" : "failed");
-    window.setTimeout(() => setCopyState("idle"), 1400);
-  }
-
-  return (
-    <button
-      type="button"
-      className={`detail-title-copy-button ${copyState !== "idle" ? "is-active" : ""}`.trim()}
-      onClick={() => {
-        void copyStoryLink();
-      }}
-      aria-label={`Copy story link for ${displayTitle}`}
-      title={statusText}
-    >
-      {displayTitle}
-    </button>
-  );
 }
 
 interface TitleSourceLinkProps {

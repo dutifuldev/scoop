@@ -237,8 +237,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -281,8 +279,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -397,8 +393,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -461,8 +455,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -512,8 +504,6 @@ describe("StoryDetailPanel", () => {
             activeLang=""
             isLoading={false}
             error=""
-            onSelectItem={vi.fn()}
-            onClearSelectedItem={vi.fn()}
           />
         </QueryClientProvider>,
       );
@@ -564,8 +554,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -594,8 +582,6 @@ describe("StoryDetailPanel", () => {
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -647,8 +633,6 @@ Evidence:
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -715,8 +699,6 @@ Evidence:
           activeLang="en"
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );
@@ -756,8 +738,6 @@ Evidence:
           activeLang=""
           isLoading={false}
           error=""
-          onSelectItem={vi.fn()}
-          onClearSelectedItem={vi.fn()}
         />
       </QueryClientProvider>,
     );

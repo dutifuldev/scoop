@@ -433,69 +433,46 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".member-expanded-url")).toBeNull();
   });
 
-  it("shows the article expansion control only when the body is truncated", async () => {
+  it("shows the article expansion control only when text is actually truncated", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
       },
     });
-    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "scrollHeight",
-    );
-    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "clientHeight",
-    );
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("article-body-collapsed") ? 640 : 0;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("article-body-collapsed") ? 240 : 0;
-      },
-    });
+    const longPreview = `Start. ${"Long article content. ".repeat(190)}Tail marker.`;
+    vi.mocked(getStoryArticlePreview).mockImplementationOnce(async (storyMemberUUID: string) => ({
+      story_article_uuid: storyMemberUUID,
+      preview_text: longPreview,
+      source: "normalized_text",
+      char_count: longPreview.length,
+      truncated: false,
+    }));
 
-    try {
-      render(
-        <QueryClientProvider client={queryClient}>
-          <StoryDetailPanel
-            selectedStoryUUID="story-uuid-single"
-            selectedItemUUID=""
-            detail={makeSingleArticleDetail()}
-            availableTags={[]}
-            activeLang=""
-            isLoading={false}
-            error=""
-            onSelectItem={vi.fn()}
-            onClearSelectedItem={vi.fn()}
-          />
-        </QueryClientProvider>,
-      );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={makeSingleArticleDetail()}
+          availableTags={[]}
+          activeLang=""
+          isLoading={false}
+          error=""
+          onSelectItem={vi.fn()}
+          onClearSelectedItem={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
 
-      const showMore = await screen.findByRole("button", { name: "Show more" });
-      await user.click(showMore);
-      expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
-    } finally {
-      if (scrollHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-      } else {
-        Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
-      }
-      if (clientHeightDescriptor) {
-        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
-      } else {
-        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
-      }
-    }
+    const showMore = await screen.findByRole("button", { name: "Show more" });
+    expect(screen.queryByText(/Tail marker/)).toBeNull();
+    await user.click(showMore);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(screen.getByText(/Tail marker/)).toBeInTheDocument();
   });
 
-  it("does not show the article expansion control for tiny measurement differences", async () => {
+  it("does not show the article expansion control based on element dimensions", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -512,13 +489,13 @@ describe("StoryDetailPanel", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get() {
-        return this.classList.contains("article-body-collapsed") ? 246 : 0;
+        return this.classList.contains("article-body-collapsed") ? 900 : 0;
       },
     });
     Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
       get() {
-        return this.classList.contains("article-body-collapsed") ? 240 : 0;
+        return this.classList.contains("article-body-collapsed") ? 100 : 0;
       },
     });
 

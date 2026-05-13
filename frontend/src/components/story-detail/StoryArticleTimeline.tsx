@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
@@ -66,6 +66,81 @@ interface StoryArticleEntryProps {
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
 
+interface ArticleTextBlock {
+  key: string;
+  paragraphs: string[];
+  label: string;
+}
+
+interface ArticleBodyModel {
+  blocks: ArticleTextBlock[];
+  isTruncated: boolean;
+}
+
+const collapsedArticleTextMaxChars = 3200;
+const truncationSuffix = "...";
+
+function runeLength(value: string): number {
+  return Array.from(value).length;
+}
+
+function truncateRunes(value: string, maxChars: number): string {
+  if (maxChars <= truncationSuffix.length) {
+    return truncationSuffix;
+  }
+
+  const runes = Array.from(value);
+  if (runes.length <= maxChars) {
+    return value;
+  }
+
+  return `${runes.slice(0, maxChars - truncationSuffix.length).join("").trimEnd()}${truncationSuffix}`;
+}
+
+function truncateArticleTextBlocks(blocks: ArticleTextBlock[], maxChars: number): ArticleBodyModel {
+  let remainingChars = maxChars;
+  let isTruncated = false;
+  const nextBlocks: ArticleTextBlock[] = [];
+
+  for (const block of blocks) {
+    if (remainingChars <= 0) {
+      isTruncated = true;
+      break;
+    }
+
+    const nextParagraphs: string[] = [];
+
+    for (const paragraph of block.paragraphs) {
+      const paragraphLength = runeLength(paragraph);
+      const paragraphSeparatorLength = nextParagraphs.length > 0 ? 2 : 0;
+      const neededLength = paragraphLength + paragraphSeparatorLength;
+
+      if (neededLength <= remainingChars) {
+        nextParagraphs.push(paragraph);
+        remainingChars -= neededLength;
+        continue;
+      }
+
+      const availableForParagraph = Math.max(0, remainingChars - paragraphSeparatorLength);
+      if (availableForParagraph > truncationSuffix.length) {
+        nextParagraphs.push(truncateRunes(paragraph, availableForParagraph));
+      }
+      isTruncated = true;
+      break;
+    }
+
+    if (nextParagraphs.length > 0) {
+      nextBlocks.push({ ...block, paragraphs: nextParagraphs });
+    }
+
+    if (isTruncated) {
+      break;
+    }
+  }
+
+  return { blocks: isTruncated ? nextBlocks : blocks, isTruncated };
+}
+
 export function StoryArticleTimeline({
   collection,
   storyUUID,
@@ -126,8 +201,6 @@ function StoryArticleEntry({
   onRemoveArticleTag,
 }: StoryArticleEntryProps): JSX.Element {
   const [isBodyExpanded, setIsBodyExpanded] = useState(false);
-  const [isBodyOverflowing, setIsBodyOverflowing] = useState(false);
-  const bodyRef = useRef<HTMLElement | null>(null);
   const representative = group.representative;
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
@@ -159,7 +232,7 @@ function StoryArticleEntry({
   );
   const showTextModeToggle = hasOriginalContent && hasTranslatedContent;
   const showTextBlockLabels = showTextModeToggle;
-  const orderedBlocks =
+  const orderedBlocks: ArticleTextBlock[] =
     detailTextMode === "translated"
       ? [
           { key: "translated", paragraphs: translatedParagraphs, label: "Translated" },
@@ -169,6 +242,9 @@ function StoryArticleEntry({
           { key: "original", paragraphs: originalParagraphs, label: "Original" },
           { key: "translated", paragraphs: translatedParagraphs, label: "Translated" },
         ];
+  const collapsedBodyModel = truncateArticleTextBlocks(orderedBlocks, collapsedArticleTextMaxChars);
+  const renderedBlocks = isBodyExpanded ? orderedBlocks : collapsedBodyModel.blocks;
+  const isArticleBodyTruncated = collapsedBodyModel.isTruncated;
   const representativeOriginalTitle = (
     representative.original_title ||
     representative.normalized_title ||
@@ -206,7 +282,7 @@ function StoryArticleEntry({
       ) : null}
 
       <div className="detail-item-content-body">
-        {orderedBlocks.map((block) =>
+        {renderedBlocks.map((block) =>
           block.paragraphs.length > 0 ? (
             <section
               key={`${group.key}-${block.key}`}
@@ -228,47 +304,6 @@ function StoryArticleEntry({
       ) : null}
     </>
   );
-
-  useEffect(() => {
-    if (!hasExpandableContent) {
-      setIsBodyOverflowing(false);
-      return;
-    }
-
-    const body = bodyRef.current;
-    if (!body) {
-      return;
-    }
-
-    const measure = (): void => {
-      if (isBodyExpanded) {
-        return;
-      }
-      setIsBodyOverflowing(body.scrollHeight - body.clientHeight > 8);
-    };
-
-    measure();
-    const frame = window.requestAnimationFrame(measure);
-    const timeout = window.setTimeout(measure, 120);
-    let resizeObserver: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== "undefined") {
-      resizeObserver = new ResizeObserver(measure);
-      resizeObserver.observe(body);
-    }
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-      resizeObserver?.disconnect();
-    };
-  }, [
-    detailTextMode,
-    hasExpandableContent,
-    isBodyExpanded,
-    isPreviewLoading,
-    resolvedOriginalText,
-    resolvedTranslatedText,
-  ]);
 
   return (
     <article
@@ -299,7 +334,6 @@ function StoryArticleEntry({
         </div>
 
         <article
-          ref={bodyRef}
           className={`detail-item-content article-body ${
             isBodyExpanded ? "article-body-expanded" : "article-body-collapsed"
           }`.trim()}
@@ -307,7 +341,7 @@ function StoryArticleEntry({
           {renderedArticleBody}
         </article>
 
-        {hasExpandableContent && (isBodyExpanded || isBodyOverflowing) ? (
+        {hasExpandableContent && (isBodyExpanded || isArticleBodyTruncated) ? (
           <button
             type="button"
             className="article-show-more"

@@ -227,7 +227,7 @@ Article identities should render as article bylines, not as tags.
 
 Do not show people in the left story list for now. The left pane should stay focused on story title, tags, and timing. Person identity rendering belongs in the right pane where the article content is visible.
 
-The byline should use the same positioning model as an X/Twitter card. The layout reference is the avatar-column plus main-content-column structure captured below; implement that structure directly in Scoop rather than documenting private local paths.
+The byline should use the same positioning model as an X/Twitter card. The existing blog's Twitter-like timeline layout is the visual and structural reference: avatar column on the left, one main content column on the right, byline at the top of that main column, and article text continuing in the same column. Use that layout model directly in Scoop; do not document private local paths.
 
 That means:
 

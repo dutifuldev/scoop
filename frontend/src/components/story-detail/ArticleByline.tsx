@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import discordLogoURL from "../../assets/discord.svg";
 import {
@@ -62,12 +62,29 @@ export function ArticleByline({
   const fallbackLabel = identity ? personIdentityLabel(identity) : source.trim();
   const visibleIdentity = handle ? `@${handle}` : fallbackLabel;
   const avatarLabel = displayName || handle || fallbackLabel || source || "article";
+  const avatarURL = identity?.avatar_url?.trim() || "";
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const bylineDate = formatBylineDate(publishedAt);
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [avatarURL]);
 
   return (
     <div className="article-byline" aria-label="Article byline">
       <span className="article-byline-rail" aria-hidden="true">
-        <span className="article-byline-avatar">{initialsFor(avatarLabel)}</span>
+        <span className="article-byline-avatar">
+          {avatarURL && !avatarLoadFailed ? (
+            <img
+              className="article-byline-avatar-image"
+              src={avatarURL}
+              alt=""
+              onError={() => setAvatarLoadFailed(true)}
+            />
+          ) : (
+            initialsFor(avatarLabel)
+          )}
+        </span>
       </span>
       <div className="article-byline-main">
         <div className="article-byline-identity">

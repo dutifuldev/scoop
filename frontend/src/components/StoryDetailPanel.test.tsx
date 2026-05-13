@@ -205,6 +205,7 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             provider: "discord",
             provider_user_id: "123456789012345678",
             handle: "alice",
+            avatar_url: "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
             identity_ref: "id://discord/id/123456789012345678?handle=alice",
             created_at: "2026-02-14T09:00:00Z",
             updated_at: "2026-02-14T09:00:00Z",
@@ -307,7 +308,12 @@ describe("StoryDetailPanel", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
     expect(screen.getByText("@alice").closest(".article-byline")).not.toBeNull();
-    expect(container.querySelector(".article-byline-avatar")).not.toBeNull();
+    const avatar = container.querySelector(".article-byline-avatar");
+    expect(avatar).not.toBeNull();
+    expect(avatar?.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
+    );
     expect(container.querySelector(".article-byline-provider-icon")).not.toBeNull();
     expect(screen.getByRole("link", { name: "solo.example.com" })).toHaveClass("title-action");
     expect(

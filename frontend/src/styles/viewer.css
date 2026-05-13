@@ -563,9 +563,13 @@
   }
 
   .article-byline-avatar {
-    @apply relative z-[1] flex shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
+    @apply relative z-[1] flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.78rem] font-bold text-panel-100;
     width: var(--article-avatar-size);
     height: var(--article-avatar-size);
+  }
+
+  .article-byline-avatar-image {
+    @apply block h-full w-full object-cover;
   }
 
   .article-byline-main {

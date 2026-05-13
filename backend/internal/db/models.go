@@ -114,6 +114,7 @@ type PersonIdentity struct {
 	Provider           string     `gorm:"column:provider;type:text;not null"`
 	ProviderUserID     *string    `gorm:"column:provider_user_id;type:text"`
 	Handle             *string    `gorm:"column:handle;type:text"`
+	AvatarURL          *string    `gorm:"column:avatar_url;type:text"`
 	IdentityRef        string     `gorm:"column:identity_ref;type:text;not null;unique"`
 	ArchivedAt         *time.Time `gorm:"column:archived_at;type:timestamptz"`
 	CreatedAt          time.Time  `gorm:"column:created_at;type:timestamptz;not null;default:now()"`

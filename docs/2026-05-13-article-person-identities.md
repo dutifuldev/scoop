@@ -47,6 +47,7 @@ person_identity_uuid
 provider
 provider_user_id
 handle
+avatar_url
 identity_ref
 archived_at
 created_at
@@ -58,10 +59,13 @@ Field meanings:
 - `provider`: lowercase provider key, such as `discord`, `x`, or `github`
 - `provider_user_id`: stable provider ID when known
 - `handle`: visible provider handle when known
+- `avatar_url`: current profile picture URL when known
 - `identity_ref`: canonical `id://...` ref
 - `archived_at`: hides the identity from normal picker results without deleting history
 
 The canonical identity ref format is defined separately in [Identity Ref Scheme](./2026-05-13-identity-ref-scheme.md).
+
+Profile pictures are display metadata on the identity row. Do not create a separate avatar table.
 
 ### `news.article_person_identities`
 
@@ -146,11 +150,31 @@ Identity management commands can live under `person-identities`:
 ```text
 scoop person-identities list [--include-archived] [--format table|json]
 scoop person-identities show <identity_ref-or-person_identity_uuid> [--format table|json]
+scoop person-identities refresh-avatar <identity_ref-or-person_identity_uuid> [--format table|json]
+scoop person-identities refresh-avatars [--provider discord] [--format table|json]
 scoop person-identities archive <identity_ref-or-person_identity_uuid>
 scoop person-identities unarchive <identity_ref-or-person_identity_uuid>
 ```
 
 Do not use `scoop person-identities add-article`. The article association command should be article-first.
+
+Avatar refresh commands update `person_identities.avatar_url` in place. They should not change article associations.
+
+For Discord identities, the refresh command should:
+
+1. Require `provider = discord`.
+2. Require `provider_user_id`.
+3. Fetch the Discord user object with backend credentials.
+4. Read the current avatar hash.
+5. Store the derived CDN URL in `avatar_url`.
+
+The stored URL should use a modest size suitable for bylines:
+
+```text
+https://cdn.discordapp.com/avatars/{discord_user_id}/{avatar_hash}.webp?size=128
+```
+
+If Discord returns no custom avatar, keep `avatar_url` empty and let the UI use initials.
 
 ## Identity Upsert
 
@@ -273,7 +297,8 @@ Byline rendering rules:
 - For other providers, use the provider icon when one exists; otherwise omit provider decoration.
 - If there is no handle, fall back to a compact provider/user label, not raw `id://...`.
 - Never show raw identity refs in normal reader UI.
-- Use a circular avatar placeholder generated from display name initials, then handle initials, then provider initials.
+- If `avatar_url` is present, render it in the circular avatar.
+- If `avatar_url` is empty or the image fails to load, use a circular avatar placeholder generated from display name initials, then handle initials, then provider initials.
 - Humans should not add or remove person identities through the normal reader UI. Identity assignment is handled by the CLI, backend jobs, or automation.
 
 Date formatting should be centralized in a frontend helper, for example `formatBylineDate(date, now)`.
@@ -318,5 +343,6 @@ Do not add these yet:
 - cross-platform person clustering
 - identity merge/split UI
 - automatic identity extraction
+- avatar history or downloaded avatar storage
 
 Those can be added later if the product needs them.

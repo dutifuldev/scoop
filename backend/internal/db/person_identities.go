@@ -22,6 +22,7 @@ type PersonIdentityRecord struct {
 	Provider           string     `json:"provider"`
 	ProviderUserID     *string    `json:"provider_user_id,omitempty"`
 	Handle             *string    `json:"handle,omitempty"`
+	AvatarURL          *string    `json:"avatar_url,omitempty"`
 	IdentityRef        string     `json:"identity_ref"`
 	ArchivedAt         *time.Time `json:"archived_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -294,7 +295,7 @@ func (p *Pool) ListPersonIdentitiesForArticleUUID(ctx context.Context, articleUU
 	var rows []articlePersonIdentityRow
 	if err := p.gdb.WithContext(ctx).
 		Table("news.articles AS a").
-		Select("pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
+		Select("pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.avatar_url, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
 		Joins("JOIN news.article_person_identities AS api ON api.article_id = a.article_id").
 		Joins("JOIN news.person_identities AS pi ON pi.person_identity_id = api.person_identity_id").
 		Where("a.article_uuid = ?::uuid AND a.deleted_at IS NULL", strings.TrimSpace(articleUUID)).
@@ -318,7 +319,7 @@ func (p *Pool) ListPersonIdentitiesForArticleUUIDs(ctx context.Context, articleU
 	uuidCondition, uuidArgs := uuidInCondition("a.article_uuid", articleUUIDs)
 	if err := p.gdb.WithContext(ctx).
 		Table("news.articles AS a").
-		Select("a.article_uuid::text AS article_uuid, pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
+		Select("a.article_uuid::text AS article_uuid, pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.avatar_url, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
 		Joins("JOIN news.article_person_identities AS api ON api.article_id = a.article_id").
 		Joins("JOIN news.person_identities AS pi ON pi.person_identity_id = api.person_identity_id").
 		Where(uuidCondition, uuidArgs...).
@@ -342,7 +343,7 @@ func (p *Pool) ListPersonIdentitiesForStoryIDs(ctx context.Context, storyIDs []i
 	var rows []storyPersonIdentityRow
 	if err := p.gdb.WithContext(ctx).
 		Table("news.story_articles AS sm").
-		Distinct("sm.story_id, pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
+		Distinct("sm.story_id, pi.person_identity_id, pi.person_identity_uuid::text AS person_identity_uuid, pi.provider, pi.provider_user_id, pi.handle, pi.avatar_url, pi.identity_ref, pi.archived_at, pi.created_at, pi.updated_at").
 		Joins("JOIN news.articles AS a ON a.article_id = sm.article_id AND a.deleted_at IS NULL").
 		Joins("JOIN news.article_person_identities AS api ON api.article_id = sm.article_id").
 		Joins("JOIN news.person_identities AS pi ON pi.person_identity_id = api.person_identity_id").
@@ -386,6 +387,43 @@ func (p *Pool) SetPersonIdentityArchived(ctx context.Context, identityRefOrUUID 
 		if err := insertAuditEventGORM(ctx, tx, nil, action, "person_identity", identity.IdentityRef, map[string]any{
 			"identity_ref": identity.IdentityRef,
 			"archived":     archived,
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	record := personIdentityModelToRecord(identity)
+	return &record, nil
+}
+
+func (p *Pool) SetPersonIdentityAvatarURL(ctx context.Context, identityRefOrUUID string, avatarURL *string, now time.Time) (*PersonIdentityRecord, error) {
+	var identity PersonIdentity
+	err := p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		found, err := lookupPersonIdentityGORM(ctx, tx, identityRefOrUUID)
+		if err != nil {
+			return err
+		}
+		var normalizedAvatarURL *string
+		if avatarURL != nil {
+			trimmed := strings.TrimSpace(*avatarURL)
+			if trimmed != "" {
+				normalizedAvatarURL = &trimmed
+			}
+		}
+		if err := tx.Model(&found).Updates(map[string]any{
+			"avatar_url": normalizedAvatarURL,
+			"updated_at": now.UTC(),
+		}).Error; err != nil {
+			return fmt.Errorf("update person identity avatar: %w", err)
+		}
+		if err := tx.Where("person_identity_id = ?", found.PersonIdentityID).First(&identity).Error; err != nil {
+			return fmt.Errorf("query person identity: %w", err)
+		}
+		if err := insertAuditEventGORM(ctx, tx, nil, "person_identity.avatar_url.update", "person_identity", identity.IdentityRef, map[string]any{
+			"identity_ref": identity.IdentityRef,
 		}); err != nil {
 			return err
 		}
@@ -500,6 +538,7 @@ type articlePersonIdentityRow struct {
 	Provider           string
 	ProviderUserID     *string
 	Handle             *string
+	AvatarURL          *string
 	IdentityRef        string
 	ArchivedAt         *time.Time
 	CreatedAt          time.Time
@@ -513,6 +552,7 @@ func (r articlePersonIdentityRow) personIdentityRecord() PersonIdentityRecord {
 		Provider:           r.Provider,
 		ProviderUserID:     r.ProviderUserID,
 		Handle:             r.Handle,
+		AvatarURL:          r.AvatarURL,
 		IdentityRef:        r.IdentityRef,
 		ArchivedAt:         r.ArchivedAt,
 		CreatedAt:          r.CreatedAt,
@@ -527,6 +567,7 @@ type storyPersonIdentityRow struct {
 	Provider           string
 	ProviderUserID     *string
 	Handle             *string
+	AvatarURL          *string
 	IdentityRef        string
 	ArchivedAt         *time.Time
 	CreatedAt          time.Time
@@ -540,6 +581,7 @@ func (r storyPersonIdentityRow) personIdentityRecord() PersonIdentityRecord {
 		Provider:           r.Provider,
 		ProviderUserID:     r.ProviderUserID,
 		Handle:             r.Handle,
+		AvatarURL:          r.AvatarURL,
 		IdentityRef:        r.IdentityRef,
 		ArchivedAt:         r.ArchivedAt,
 		CreatedAt:          r.CreatedAt,

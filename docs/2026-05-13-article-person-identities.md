@@ -225,51 +225,60 @@ The list endpoint should search:
 
 Article identities should render as article bylines, not as tags.
 
-Do not show people in the left story list for now. The left pane should stay focused on story title, tags, and timing. Person identity rendering belongs in the right pane where the article content is visible.
+The left pane owns story navigation. It is okay for the story title to appear only there. The right pane should not render a separate story title/header component; it should render article entries for reading.
 
-The byline should use the same positioning model as an X/Twitter card. The existing blog's Twitter-like timeline layout is the visual and structural reference: avatar column on the left, one main content column on the right, byline at the top of that main column, and article text continuing in the same column. Use that layout model directly in Scoop; do not document private local paths.
+The right pane should use an article timeline model. The existing blog's Twitter-like timeline layout is the visual and structural reference: avatar rail on the left, one main content column on the right, byline at the top of that main column, article title below the byline, and article text continuing in the same column. Use that layout model directly in Scoop; do not document private local paths.
 
-That means:
-
-- the article content uses an avatar column plus a main content column
-- the byline sits at the top of the main column, before the article text
-- avatar, handle, provider icon, dot, and date align on one compact row
-- the row wraps cleanly on narrow screens without separating the avatar from the text column
-
-Target examples:
+Target layout:
 
 ```text
-[avatar] Display Name @handle · 5h
-[avatar] @handle [discord icon] · May 11
-[avatar] @handle [provider icon] · Jun 1, 2025
+left pane
+  story title, tags, timing, active state
+
+right pane
+  StoryArticleTimeline
+    StoryArticleEntry
+      timeline rail
+        avatar
+        vertical connector when another article follows
+      content column
+        ArticleByline
+        ArticleTitleRow
+        ArticleBodyPreview
+        Show more
 ```
 
-Implementation shape:
+Each article entry should look like:
 
 ```text
-ArticleByline
-  identities
-  publishedAt
-  source
+[avatar]  @handle [provider icon] · May 11
+   |      Article title [source action] [tags]
+   |      Truncated article content...
+   |      Show more
 ```
+
+For a single-article story, do not render an extra top-level story title in the right pane. Render the article title only in the article entry, below the author line and above the content.
+
+For a multi-article story, render the entries as a timeline. Entries before the last one should show a vertical connector line in the avatar rail. The line should visually connect profile circles like the existing blog timeline.
 
 Render the first deterministic article identity as the primary byline identity. Multiple identities can be represented later with a compact `+N` affordance if needed; the common v1 case is one external author per article.
 
-Rendering rules:
+Byline rendering rules:
 
 - Prefer display name when the model has one in the future.
 - For now, display name is usually absent, so show `@handle`.
 - Show the handle first. Do not prefix bylines or chips with provider text like `DISCORD`.
 - For Discord identities, show a small borderless Discord icon immediately after the handle.
+- The Discord icon in the author line and any Discord source action in the title line should use the same visual size and equivalent vertical centering.
 - For other providers, use the provider icon when one exists; otherwise omit provider decoration.
 - If there is no handle, fall back to a compact provider/user label, not raw `id://...`.
 - Never show raw identity refs in normal reader UI.
-- Use a small circular avatar placeholder generated from display name initials, then handle initials, then provider initials.
-- Keep existing add/remove controls separate from the read-only byline presentation.
+- Use a circular avatar placeholder generated from display name initials, then handle initials, then provider initials.
+- Humans should not add or remove person identities through the normal reader UI. Identity assignment is handled by the CLI, backend jobs, or automation.
 
 Date formatting should be centralized in a frontend helper, for example `formatBylineDate(date, now)`.
 
-Use Twitter-style compact dates:
+Use Twitter-style compact dates and show only one visible date in the byline:
 
 ```text
 now       under 1 minute
@@ -279,15 +288,26 @@ May 11    same calendar year
 Jun 1, 2025  different calendar year
 ```
 
-Adding an identity should feel similar to adding a tag:
+Additional pipeline metadata belongs in the date hover text, not inline in the byline. The tooltip can include:
 
-1. Click a small add button.
-2. Type or paste an identity ref.
-3. Save.
+```text
+Published May 10, 15:10 · Ingested May 11, 14:03 · Decision: new story
+```
 
-If the identity ref is new, the backend can create it automatically.
+Article title behavior:
 
-The normal UI can show the created identity immediately. It does not need a separate person-management screen for the first version.
+- Clicking the article title copies the article canonical URL when available.
+- If the article has no canonical URL, clicking the title copies the story URL.
+- The source icon remains the explicit "open source" action.
+- The title should show temporary copied feedback after a successful copy.
+
+Article content behavior:
+
+- Remove article-level chevron/collapse buttons.
+- Show article content as a truncated preview by default, similar to Twitter.
+- Put a `Show more` button on a new line below truncated content.
+- Expanding should happen inline for that article entry.
+- A `Show less` action is optional but acceptable for long entries.
 
 ## Non-Goals
 

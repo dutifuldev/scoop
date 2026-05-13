@@ -356,12 +356,30 @@ export function StoryViewerPage(): JSX.Element {
       return;
     }
 
-    applySearch({
+    const nextSearch = compactSearchForCurrentPath({
       ...viewerSearch,
       day,
       from: undefined,
       to: undefined,
       page: undefined,
+    });
+
+    clearPassiveStoryURLTimer();
+    setActiveReaderStoryUUID("");
+    setReaderScrollTargetStoryUUID("");
+
+    if (routeCollection) {
+      void navigate({
+        to: "/c/$collection",
+        params: { collection: routeCollection },
+        search: nextSearch,
+      });
+      return;
+    }
+
+    void navigate({
+      to: "/",
+      search: nextSearch,
     });
   }
 

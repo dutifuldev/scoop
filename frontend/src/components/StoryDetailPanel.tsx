@@ -12,13 +12,13 @@ import {
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, Tag } from "../types";
-import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
+import { hasActivePersonIdentity } from "../lib/identityFormat";
+import { StoryHeader } from "./story-detail/StoryHeader";
 import {
   buildMemberGroups,
   StoryArticleGroup,
   type MemberURLGroup,
 } from "./story-detail/StoryArticleGroup";
-import { StoryTitleCopyButton, TitleActions, TitleSourceLink } from "./story-detail/TitleActions";
 
 interface StoryDetailPanelProps {
   selectedStoryUUID: string;
@@ -247,63 +247,6 @@ export function StoryDetailPanel({
     }
   }
 
-  function renderStoryHeader(): JSX.Element {
-    if (!detail) {
-      return <></>;
-    }
-
-    const originalTitle = (detail.story.original_title || detail.story.title || "").trim();
-    const translatedTitle = (detail.story.translated_title || "").trim();
-    const showTranslatedTitle = activeLang !== "" && translatedTitle !== "";
-    const displayTitle = showTranslatedTitle ? translatedTitle : originalTitle;
-    const titleLinkURL =
-      detail.story.article_count <= 1 && memberGroups.length === 1
-        ? memberGroups[0].canonicalURL
-        : "";
-    const singleRepresentative =
-      detail.story.article_count <= 1 && memberGroups.length === 1
-        ? memberGroups[0].representative
-        : null;
-    const hideSingleArticleHeader = Boolean(
-      singleRepresentative?.person_identities?.some((identity) => !identity.archived_at),
-    );
-
-    if (hideSingleArticleHeader) {
-      return <></>;
-    }
-
-    return (
-      <>
-        <div className="detail-title-row">
-          <TitleActions className="detail-title-cluster">
-            <h2 className="detail-title" aria-label={displayTitle}>
-              <StoryTitleCopyButton
-                title={displayTitle}
-                collection={detail.story.collection}
-                storyUUID={detail.story.story_uuid}
-              />
-            </h2>
-            {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
-            {singleRepresentative ? (
-              <ArticleTagEditor
-                articleUUID={singleRepresentative.article_uuid}
-                currentTags={singleRepresentative.tags ?? []}
-                availableTags={availableTags}
-                mutationKey={tagMutationKey}
-                variant="title"
-                onAddTag={onAddArticleTag}
-                onRemoveTag={onRemoveArticleTag}
-              />
-            ) : null}
-          </TitleActions>
-        </div>
-        {showTranslatedTitle ? (
-          <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>
-        ) : null}
-      </>
-    );
-  }
-
   function renderStoryView(): JSX.Element {
     if (!detail) {
       return <></>;
@@ -311,13 +254,19 @@ export function StoryDetailPanel({
     const isMergedStory = detail.story.article_count > 1 || memberGroups.length > 1;
     const singleArticleHasIdentity =
       !isMergedStory &&
-      Boolean(
-        memberGroups[0]?.representative.person_identities?.some((identity) => !identity.archived_at),
-      );
+      hasActivePersonIdentity(memberGroups[0]?.representative.person_identities);
 
     return (
       <>
-        {renderStoryHeader()}
+        <StoryHeader
+          detail={detail}
+          memberGroups={memberGroups}
+          activeLang={activeLang}
+          availableTags={availableTags}
+          tagMutationKey={tagMutationKey}
+          onAddArticleTag={onAddArticleTag}
+          onRemoveArticleTag={onRemoveArticleTag}
+        />
         {activeLang ? (
           <div className="detail-text-mode-toggle" role="group" aria-label="Detail text mode">
             <button
@@ -371,7 +320,7 @@ export function StoryDetailPanel({
               itemPreviewByUUID={itemPreviewByUUID}
               itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
               itemPreviewErrorByUUID={itemPreviewErrorByUUID}
-              showPrimaryTagEditor={isMergedStory || singleArticleHasIdentity}
+              showArticleTitleActions={isMergedStory || singleArticleHasIdentity}
               onExpandedGroupKeysChange={setExpandedGroupKeys}
               onSelectItem={onSelectItem}
               onClearSelectedItem={onClearSelectedItem}

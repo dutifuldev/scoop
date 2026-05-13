@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 
 import discordLogoURL from "../../assets/discord.svg";
+import {
+  cleanIdentityHandle,
+  personIdentityLabel,
+  primaryPersonIdentity,
+} from "../../lib/identityFormat";
 import { formatBylineDate } from "../../lib/viewerFormat";
 import type { PersonIdentity } from "../../types";
 
@@ -9,33 +14,6 @@ interface ArticleBylineProps {
   publishedAt?: string;
   source?: string;
   children?: ReactNode;
-}
-
-function cleanHandle(handle: string): string {
-  return handle.trim().replace(/^@+/, "");
-}
-
-function primaryIdentity(identities: PersonIdentity[] = []): PersonIdentity | null {
-  const active = identities.filter((identity) => !identity.archived_at);
-  if (active.length === 0) {
-    return null;
-  }
-
-  return [...active].sort((a, b) => {
-    const left = [
-      a.handle || "",
-      a.provider || "",
-      a.provider_user_id || "",
-      a.person_identity_uuid || "",
-    ].join(":");
-    const right = [
-      b.handle || "",
-      b.provider || "",
-      b.provider_user_id || "",
-      b.person_identity_uuid || "",
-    ].join(":");
-    return left.localeCompare(right);
-  })[0];
 }
 
 function initialsFor(label: string): string {
@@ -64,26 +42,16 @@ function providerIcon(identity: PersonIdentity): JSX.Element | null {
   );
 }
 
-function personIdentityLabel(identity: PersonIdentity): string {
-  if (identity.handle?.trim()) {
-    return `@${identity.handle.trim()}`;
-  }
-  if (identity.provider_user_id?.trim()) {
-    return `${identity.provider}:${identity.provider_user_id.trim()}`;
-  }
-  return identity.provider.trim() || "person";
-}
-
 export function ArticleByline({
   identities = [],
   publishedAt,
   source = "",
   children,
 }: ArticleBylineProps): JSX.Element {
-  const identity = primaryIdentity(identities);
+  const identity = primaryPersonIdentity(identities);
   const displayName = identity?.display_name?.trim() || "";
   const rawHandle = identity?.handle?.trim() || "";
-  const handle = rawHandle ? cleanHandle(rawHandle) : "";
+  const handle = rawHandle ? cleanIdentityHandle(rawHandle) : "";
   const fallbackLabel = identity ? personIdentityLabel(identity) : source.trim();
   const visibleIdentity = handle ? `@${handle}` : fallbackLabel;
   const avatarLabel = displayName || handle || fallbackLabel || source || "article";

@@ -1,12 +1,12 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 
+import { hasActivePersonIdentity } from "../../lib/identityFormat";
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticle, StoryArticlePreview, StoryDetailResponse, Tag } from "../../types";
 import { ArticleTagEditor } from "./ArticleTagEditor";
 import { ArticleByline } from "./ArticleByline";
+import { ArticleTitleRow } from "./ArticleTitleRow";
 import { buildMemberPreview, renderTextBlock, toParagraphs } from "./storyTextRendering";
-import { TitleActions, TitleSourceLink } from "./TitleActions";
 
 export interface MemberURLGroup {
   key: string;
@@ -47,7 +47,7 @@ interface StoryArticleGroupProps {
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
-  showPrimaryTagEditor?: boolean;
+  showArticleTitleActions?: boolean;
   onExpandedGroupKeysChange: Dispatch<SetStateAction<string[]>>;
   onSelectItem: (itemUUID: string) => void;
   onClearSelectedItem: () => void;
@@ -68,7 +68,7 @@ export function StoryArticleGroup({
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
-  showPrimaryTagEditor = true,
+  showArticleTitleActions = true,
   onExpandedGroupKeysChange,
   onSelectItem,
   onClearSelectedItem,
@@ -132,65 +132,42 @@ export function StoryArticleGroup({
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
   const routeItemUUID = hasSelectedMember ? selectedItemUUID : representative.story_article_uuid;
-  const hasRepresentativeIdentity = (representative.person_identities ?? []).some(
-    (identity) => !identity.archived_at,
-  );
+  const hasRepresentativeIdentity = hasActivePersonIdentity(representative.person_identities);
   const shouldPlaceTitleInByline = hasRepresentativeIdentity;
-  const renderMemberTitleRow = (className = ""): JSX.Element => (
-    <div className={`member-title-row ${className}`.trim()}>
-      <TitleActions className="member-title-cluster">
-        {isMergedStory ? (
-          <button
-            type="button"
-            className={`member-toggle ${isExpanded ? "expanded" : ""}`.trim()}
-            onClick={() => {
-              if (isExpanded) {
-                onExpandedGroupKeysChange((previous) =>
-                  previous.filter((existingGroupKey) => existingGroupKey !== group.key),
-                );
-                if (hasSelectedMember) {
-                  onClearSelectedItem();
-                }
-                return;
-              }
+  const toggleGroup = (): void => {
+    if (isExpanded) {
+      onExpandedGroupKeysChange((previous) =>
+        previous.filter((existingGroupKey) => existingGroupKey !== group.key),
+      );
+      if (hasSelectedMember) {
+        onClearSelectedItem();
+      }
+      return;
+    }
 
-              onExpandedGroupKeysChange((previous) => {
-                if (previous.includes(group.key)) {
-                  return previous;
-                }
-                return [...previous, group.key];
-              });
-              onSelectItem(routeItemUUID);
-            }}
-            aria-expanded={isExpanded}
-            aria-label={`${isExpanded ? "Collapse" : "Expand"} item ${representativeDisplayTitle || "(no title)"}`}
-          >
-            <p className="member-head">{representativeDisplayTitle || "(no title)"}</p>
-            {isExpanded ? (
-              <ChevronDown className="member-toggle-icon" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="member-toggle-icon" aria-hidden="true" />
-            )}
-          </button>
-        ) : (
-          <p className="member-head member-head-static">
-            {representativeDisplayTitle || "(no title)"}
-          </p>
-        )}
-        {group.canonicalURL ? <TitleSourceLink url={group.canonicalURL} /> : null}
-        {showPrimaryTagEditor ? (
-          <ArticleTagEditor
-            articleUUID={representative.article_uuid}
-            currentTags={representative.tags ?? []}
-            availableTags={availableTags}
-            mutationKey={tagMutationKey}
-            variant="title"
-            onAddTag={onAddArticleTag}
-            onRemoveTag={onRemoveArticleTag}
-          />
-        ) : null}
-      </TitleActions>
-    </div>
+    onExpandedGroupKeysChange((previous) => {
+      if (previous.includes(group.key)) {
+        return previous;
+      }
+      return [...previous, group.key];
+    });
+    onSelectItem(routeItemUUID);
+  };
+  const renderMemberTitleRow = (className = ""): JSX.Element => (
+    <ArticleTitleRow
+      article={representative}
+      title={representativeDisplayTitle}
+      canonicalURL={group.canonicalURL}
+      isExpanded={isExpanded}
+      isMergedStory={isMergedStory}
+      showArticleActions={showArticleTitleActions}
+      availableTags={availableTags}
+      tagMutationKey={tagMutationKey}
+      className={className}
+      onToggle={toggleGroup}
+      onAddArticleTag={onAddArticleTag}
+      onRemoveArticleTag={onRemoveArticleTag}
+    />
   );
   const memberMetadata: ReactNode = (
     <p className="member-sub">

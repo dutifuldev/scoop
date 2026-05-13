@@ -13,13 +13,12 @@ import {
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
 import type { StoryDetailResponse, StoryListItem, Tag } from "../types";
-import { ArticleTagEditor } from "./story-detail/ArticleTagEditor";
+import { shouldHideSingleArticleHeader, StoryHeader } from "./story-detail/StoryHeader";
 import {
   buildMemberGroups,
   StoryArticleGroup,
   type MemberURLGroup,
 } from "./story-detail/StoryArticleGroup";
-import { StoryTitleCopyButton, TitleActions, TitleSourceLink } from "./story-detail/TitleActions";
 
 const initialReaderStoryCount = 3;
 const readerPageSize = 3;
@@ -832,22 +831,8 @@ function StoryReaderSection({
     }
   }
 
-  const originalTitle = (detail?.story.original_title || detail?.story.title || "").trim();
-  const translatedTitle = (detail?.story.translated_title || "").trim();
-  const showTranslatedTitle = sectionActiveLang !== "" && translatedTitle !== "";
-  const displayTitle = showTranslatedTitle ? translatedTitle : originalTitle;
   const isMergedStory = detail ? detail.story.article_count > 1 || memberGroups.length > 1 : false;
-  const titleLinkURL =
-    detail && detail.story.article_count <= 1 && memberGroups.length === 1
-      ? memberGroups[0].canonicalURL
-      : "";
-  const singleRepresentative =
-    detail && detail.story.article_count <= 1 && memberGroups.length === 1
-      ? memberGroups[0].representative
-      : null;
-  const hideSingleArticleHeader = Boolean(
-    singleRepresentative?.person_identities?.some((identity) => !identity.archived_at),
-  );
+  const hideSingleArticleHeader = shouldHideSingleArticleHeader(detail, memberGroups);
 
   return (
     <section
@@ -859,36 +844,16 @@ function StoryReaderSection({
       {!isLoading && error ? <p className="muted">{error}</p> : null}
       {detail ? (
         <>
-          {!hideSingleArticleHeader ? (
-            <div className="reader-story-header">
-              <div className="detail-title-row">
-                <TitleActions className="detail-title-cluster">
-                  <h2 className="detail-title" aria-label={displayTitle}>
-                    <StoryTitleCopyButton
-                      title={displayTitle}
-                      collection={detail.story.collection}
-                      storyUUID={detail.story.story_uuid}
-                    />
-                  </h2>
-                  {titleLinkURL ? <TitleSourceLink url={titleLinkURL} /> : null}
-                  {singleRepresentative ? (
-                    <ArticleTagEditor
-                      articleUUID={singleRepresentative.article_uuid}
-                      currentTags={singleRepresentative.tags ?? []}
-                      availableTags={availableTags}
-                      mutationKey={tagMutationKey}
-                      variant="title"
-                      onAddTag={onAddArticleTag}
-                      onRemoveTag={onRemoveArticleTag}
-                    />
-                  ) : null}
-                </TitleActions>
-              </div>
-              {showTranslatedTitle ? (
-                <p className="detail-title-original">Original: {originalTitle || "(untitled)"}</p>
-              ) : null}
-            </div>
-          ) : null}
+          <StoryHeader
+            detail={detail}
+            memberGroups={memberGroups}
+            activeLang={sectionActiveLang}
+            availableTags={availableTags}
+            tagMutationKey={tagMutationKey}
+            wrapperClassName="reader-story-header"
+            onAddArticleTag={onAddArticleTag}
+            onRemoveArticleTag={onRemoveArticleTag}
+          />
 
           {sectionActiveLang ? (
             <div className="detail-text-mode-toggle" role="group" aria-label="Detail text mode">
@@ -945,7 +910,7 @@ function StoryReaderSection({
                 itemPreviewByUUID={itemPreviewByUUID}
                 itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
                 itemPreviewErrorByUUID={itemPreviewErrorByUUID}
-                showPrimaryTagEditor={isMergedStory || hideSingleArticleHeader}
+                showArticleTitleActions={isMergedStory || hideSingleArticleHeader}
                 onExpandedGroupKeysChange={setExpandedGroupKeys}
                 onSelectItem={(itemUUID) =>
                   onSelectItem(storyUUID, itemUUID, detail.story.collection)

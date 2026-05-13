@@ -264,6 +264,15 @@
     @apply bg-panel-700/35;
   }
 
+  .reader-story-section-highlighted {
+    background: color-mix(in srgb, var(--tag-highlight-color) 7%, transparent);
+    box-shadow: inset 3px 0 0 var(--tag-highlight-color);
+  }
+
+  .reader-story-section-highlighted.is-active {
+    background: color-mix(in srgb, var(--tag-highlight-color) 8%, #16181c);
+  }
+
   .reader-story-header {
     @apply px-5 pt-5;
   }

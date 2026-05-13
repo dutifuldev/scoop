@@ -10,6 +10,7 @@ import {
   defaultCollectionTranslationMode,
   isCollectionTranslationEnabled,
 } from "../lib/collectionTranslation";
+import { tagHighlightStyle } from "../lib/tagHighlight";
 import type { StoryDetailResponse, StoryListItem, Tag } from "../types";
 import { StoryArticleTimeline } from "./story-detail/StoryArticleTimeline";
 
@@ -673,6 +674,14 @@ function StoryReaderSection({
     isTranslationActive: isActive,
     onTranslationStateChange,
   });
+  const storyHighlightTags = useMemo(
+    () => [
+      ...(detail?.story.tags ?? []),
+      ...memberGroups.flatMap((group) => group.representative.tags ?? []),
+    ],
+    [detail?.story.tags, memberGroups],
+  );
+  const storyHighlightStyle = tagHighlightStyle(storyHighlightTags);
 
   useEffect(() => {
     if (detail) {
@@ -683,7 +692,10 @@ function StoryReaderSection({
   return (
     <section
       ref={refCallback}
-      className={`reader-story-section ${isActive ? "is-active" : ""}`.trim()}
+      className={`reader-story-section ${isActive ? "is-active" : ""} ${
+        storyHighlightStyle ? "reader-story-section-highlighted" : ""
+      }`.trim()}
+      style={storyHighlightStyle}
       data-story-uuid={storyUUID}
     >
       {isLoading && !detail ? <p className="muted">Fetching story detail...</p> : null}

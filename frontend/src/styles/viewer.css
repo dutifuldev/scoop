@@ -695,7 +695,7 @@
   }
 
   .detail-item-content {
-    @apply mt-2 rounded-[10px] border border-panel-500 bg-panel-700/50 p-3;
+    @apply mt-2 rounded-none border-0 bg-transparent p-0;
   }
 
   .detail-item-content-single {
@@ -711,7 +711,7 @@
   }
 
   .detail-text-block {
-    @apply grid gap-3 rounded-[8px] border border-panel-500/60 px-5 py-4;
+    @apply grid gap-3 rounded-none border-0 bg-transparent px-0 py-0;
   }
 
   .detail-text-block-single,
@@ -721,11 +721,11 @@
   }
 
   .detail-text-block-original {
-    @apply bg-panel-700/40;
+    @apply bg-transparent;
   }
 
   .detail-text-block-translated {
-    @apply border-panel-400/45 bg-panel-700/35;
+    @apply border-0 bg-transparent;
   }
 
   .detail-text-label {

@@ -517,7 +517,13 @@
   }
 
   .article-show-more {
-    @apply mt-1.5 inline-flex border-0 bg-transparent p-0 text-[0.94rem] font-semibold leading-[1.6] text-panel-400 transition-colors duration-150 hover:text-panel-100 focus-visible:outline-none focus-visible:text-panel-100;
+    @apply mt-1.5 inline-flex border-0 bg-transparent p-0 text-[0.94rem] font-normal leading-[1.6] transition-colors duration-150 focus-visible:outline-none;
+    color: var(--scoop-text-highlight);
+  }
+
+  .article-show-more:hover,
+  .article-show-more:focus-visible {
+    color: color-mix(in srgb, var(--scoop-text-highlight) 82%, white);
   }
 
   .article-byline {

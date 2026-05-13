@@ -127,7 +127,7 @@ function StoryArticleEntry({
 }: StoryArticleEntryProps): JSX.Element {
   const [isBodyExpanded, setIsBodyExpanded] = useState(false);
   const [isBodyOverflowing, setIsBodyOverflowing] = useState(false);
-  const collapsedBodyRef = useRef<HTMLElement | null>(null);
+  const bodyRef = useRef<HTMLElement | null>(null);
   const representative = group.representative;
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
@@ -229,25 +229,22 @@ function StoryArticleEntry({
     </>
   );
 
-  const renderedArticleContent = (
-    <article className="detail-item-content article-body-expanded">
-      {renderedArticleBody}
-    </article>
-  );
-
   useEffect(() => {
     if (!hasExpandableContent) {
       setIsBodyOverflowing(false);
       return;
     }
 
-    const body = collapsedBodyRef.current;
+    const body = bodyRef.current;
     if (!body) {
       return;
     }
 
     const measure = (): void => {
-      setIsBodyOverflowing(body.scrollHeight > body.clientHeight + 1);
+      if (isBodyExpanded) {
+        return;
+      }
+      setIsBodyOverflowing(body.scrollHeight - body.clientHeight > 8);
     };
 
     measure();
@@ -301,15 +298,14 @@ function StoryArticleEntry({
           />
         </div>
 
-        {isBodyExpanded ? (
-          renderedArticleContent
-        ) : (
-          <div className="article-body-preview">
-            <article ref={collapsedBodyRef} className="detail-item-content article-body-collapsed">
-              {renderedArticleBody}
-            </article>
-          </div>
-        )}
+        <article
+          ref={bodyRef}
+          className={`detail-item-content article-body ${
+            isBodyExpanded ? "article-body-expanded" : "article-body-collapsed"
+          }`.trim()}
+        >
+          {renderedArticleBody}
+        </article>
 
         {hasExpandableContent && (isBodyExpanded || isBodyOverflowing) ? (
           <button

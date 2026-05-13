@@ -505,8 +505,8 @@
     @apply text-brand-400;
   }
 
-  .article-body-preview {
-    @apply min-w-0 overflow-hidden;
+  .article-body {
+    @apply min-w-0;
   }
 
   .article-body-collapsed {
@@ -515,7 +515,7 @@
   }
 
   .article-show-more {
-    @apply mt-1.5 inline-flex border-0 bg-transparent p-0 text-[0.94rem] font-normal leading-[1.6] transition-colors duration-150 focus-visible:outline-none;
+    @apply mt-1.5 inline-flex border-0 bg-transparent p-0 font-news text-[0.94rem] font-normal leading-[1.6] transition-colors duration-150 focus-visible:outline-none;
     color: var(--scoop-text-highlight);
   }
 

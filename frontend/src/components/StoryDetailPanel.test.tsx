@@ -495,6 +495,67 @@ describe("StoryDetailPanel", () => {
     }
   });
 
+  it("does not show the article expansion control for tiny measurement differences", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight",
+    );
+    const clientHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 246 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("article-body-collapsed") ? 240 : 0;
+      },
+    });
+
+    try {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <StoryDetailPanel
+            selectedStoryUUID="story-uuid-single"
+            selectedItemUUID=""
+            detail={makeSingleArticleDetail()}
+            availableTags={[]}
+            activeLang=""
+            isLoading={false}
+            error=""
+            onSelectItem={vi.fn()}
+            onClearSelectedItem={vi.fn()}
+          />
+        </QueryClientProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+      });
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      }
+      if (clientHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeightDescriptor);
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      }
+    }
+  });
+
   it("renders Discord title source links with shared title action geometry", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {

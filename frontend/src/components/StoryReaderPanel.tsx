@@ -606,8 +606,6 @@ export function StoryReaderPanel({
               isActive={isActive}
               isLoading={Boolean(query?.isPending)}
               error={query?.error instanceof Error ? query.error.message : ""}
-              connectPrevious={index > 0}
-              connectNext={index < visibleStoryUUIDs.length - 1}
               onSelectItem={onSelectItem}
               onClearSelectedItem={onClearSelectedItem}
               onTranslationStateChange={onTranslationStateChange}
@@ -636,8 +634,6 @@ interface StoryReaderSectionProps {
   isActive: boolean;
   isLoading: boolean;
   error: string;
-  connectPrevious: boolean;
-  connectNext: boolean;
   refCallback: RefCallback<HTMLElement>;
   onSelectItem: (storyUUID: string, itemUUID: string, collection?: string) => void;
   onClearSelectedItem: (storyUUID: string, collection?: string) => void;
@@ -653,8 +649,6 @@ function StoryReaderSection({
   isActive,
   isLoading,
   error,
-  connectPrevious,
-  connectNext,
   refCallback,
   onTranslationStateChange,
 }: StoryReaderSectionProps): JSX.Element {
@@ -867,8 +861,6 @@ function StoryReaderSection({
             itemPreviewByUUID={itemPreviewByUUID}
             itemPreviewLoadingByUUID={itemPreviewLoadingByUUID}
             itemPreviewErrorByUUID={itemPreviewErrorByUUID}
-            connectPrevious={connectPrevious}
-            connectNext={connectNext}
             onAddArticleTag={onAddArticleTag}
             onRemoveArticleTag={onRemoveArticleTag}
           />

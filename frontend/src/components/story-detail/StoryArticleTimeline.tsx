@@ -44,8 +44,6 @@ interface StoryArticleTimelineProps {
   itemPreviewByUUID: Record<string, StoryArticlePreview>;
   itemPreviewLoadingByUUID: Record<string, boolean>;
   itemPreviewErrorByUUID: Record<string, string>;
-  connectPrevious?: boolean;
-  connectNext?: boolean;
   onAddArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
   onRemoveArticleTag: (articleUUID: string, tagSlug: string) => Promise<void>;
 }
@@ -155,8 +153,6 @@ export function StoryArticleTimeline({
   itemPreviewByUUID,
   itemPreviewLoadingByUUID,
   itemPreviewErrorByUUID,
-  connectPrevious = false,
-  connectNext = false,
   onAddArticleTag,
   onRemoveArticleTag,
 }: StoryArticleTimelineProps): JSX.Element {
@@ -170,8 +166,8 @@ export function StoryArticleTimeline({
           storyUUID={storyUUID}
           group={group}
           isSelected={selectedItemUUID === group.representative.story_article_uuid}
-          hasPrevious={connectPrevious || index > 0}
-          hasNext={connectNext || index < groups.length - 1}
+          hasPrevious={groups.length > 1 && index > 0}
+          hasNext={groups.length > 1 && index < groups.length - 1}
           detailTextMode={detailTextMode}
           activeLang={activeLang}
           availableTags={availableTags}

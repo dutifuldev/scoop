@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StoryListItem } from "../types";
 
-import { buildFeedMetaText, buildFeedSourceText, formatDateTime } from "./viewerFormat";
+import {
+  buildFeedMetaText,
+  buildFeedSourceText,
+  formatBylineDate,
+  formatDateTime,
+} from "./viewerFormat";
 
 function makeStory(overrides: Partial<StoryListItem>): StoryListItem {
   return {
@@ -123,5 +128,23 @@ describe("formatDateTime", () => {
     expect(text).toContain("2025");
     expect(text).not.toMatch(/\bAM\b|\bPM\b/);
     expect(text).not.toMatch(/:\d{2}:\d{2}$/);
+  });
+});
+
+describe("formatBylineDate", () => {
+  const now = new Date("2026-05-13T12:00:00Z");
+
+  it("uses compact relative time for recent dates", () => {
+    expect(formatBylineDate("2026-05-13T11:59:45Z", now)).toBe("now");
+    expect(formatBylineDate("2026-05-13T11:48:00Z", now)).toBe("12m");
+    expect(formatBylineDate("2026-05-13T06:30:00Z", now)).toBe("5h");
+  });
+
+  it("uses month and day for older dates in the same year", () => {
+    expect(formatBylineDate("2026-05-11T10:00:00Z", now)).toBe("May 11");
+  });
+
+  it("adds the year for dates outside the current year", () => {
+    expect(formatBylineDate("2025-06-01T10:00:00Z", now)).toBe("Jun 1, 2025");
   });
 });

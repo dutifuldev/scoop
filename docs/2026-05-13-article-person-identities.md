@@ -223,7 +223,61 @@ The list endpoint should search:
 
 ## UI Shape
 
-Article views should show person identity chips near the article title or metadata.
+Article identities should render as article bylines, not as tags.
+
+Do not show people in the left story list for now. The left pane should stay focused on story title, tags, and timing. Person identity rendering belongs in the right pane where the article content is visible.
+
+The byline should use the same positioning model as an X/Twitter card. The layout reference is the avatar-column plus main-content-column structure captured below; implement that structure directly in Scoop rather than documenting private local paths.
+
+That means:
+
+- the article content uses an avatar column plus a main content column
+- the byline sits at the top of the main column, before the article text
+- avatar, handle, provider icon, dot, and date align on one compact row
+- the row wraps cleanly on narrow screens without separating the avatar from the text column
+
+Target examples:
+
+```text
+[avatar] Display Name @handle · 5h
+[avatar] @handle [discord icon] · May 11
+[avatar] @handle [provider icon] · Jun 1, 2025
+```
+
+Implementation shape:
+
+```text
+ArticleByline
+  identities
+  publishedAt
+  source
+```
+
+Render the first deterministic article identity as the primary byline identity. Multiple identities can be represented later with a compact `+N` affordance if needed; the common v1 case is one external author per article.
+
+Rendering rules:
+
+- Prefer display name when the model has one in the future.
+- For now, display name is usually absent, so show `@handle`.
+- Show the handle first. Do not prefix bylines or chips with provider text like `DISCORD`.
+- For Discord identities, show a small borderless Discord icon immediately after the handle.
+- For other providers, use the provider icon when one exists; otherwise omit provider decoration.
+- If there is no handle, fall back to a compact provider/user label, not raw `id://...`.
+- Never show raw identity refs in normal reader UI.
+- Use a small circular avatar placeholder generated from display name initials, then handle initials, then provider initials.
+- Keep existing add/remove controls separate from the read-only byline presentation.
+
+Date formatting should be centralized in a frontend helper, for example `formatBylineDate(date, now)`.
+
+Use Twitter-style compact dates:
+
+```text
+now       under 1 minute
+12m       under 1 hour
+5h        under 24 hours
+May 11    same calendar year
+Jun 1, 2025  different calendar year
+```
 
 Adding an identity should feel similar to adding a tag:
 

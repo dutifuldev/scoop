@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, User, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import type { PersonIdentity } from "../../types";
 import { Input } from "../ui/input";
-import { TitleActionButton, TitleTag, TitleTagInput } from "./TitleActions";
+import { TitleActionButton, TitleTagInput } from "./TitleActions";
 
 interface ArticlePersonIdentityEditorProps {
   articleUUID: string;
@@ -21,7 +21,7 @@ export function personIdentityLabel(identity: PersonIdentity): string {
   if (identity.provider_user_id?.trim()) {
     return identity.provider_user_id.trim();
   }
-  return identity.identity_ref;
+  return identity.provider.trim() || "person";
 }
 
 export function personIdentityTitle(identity: PersonIdentity): string {
@@ -86,41 +86,24 @@ export function ArticlePersonIdentityEditor({
     }
   }
 
-  const renderedIdentities = identities.map((identity) => {
+  const renderedEditTokens = identities.map((identity) => {
     const label = personIdentityLabel(identity);
     const title = personIdentityTitle(identity);
     const removeMutationKey = `${articleUUID}:${identity.person_identity_uuid}:remove`;
-    const renderedRemoveButton = (
-      <button
-        type="button"
-        className={`person-chip-remove ${isTitleVariant ? "title-person-remove" : ""}`.trim()}
-        onClick={() => {
-          void onRemoveIdentity(articleUUID, identity.person_identity_uuid);
-        }}
-        disabled={mutationKey === removeMutationKey}
-        aria-label={`Remove ${title}`}
-      >
-        <X className="person-chip-remove-icon" aria-hidden="true" />
-      </button>
-    );
-
-    if (isTitleVariant) {
-      return (
-        <TitleTag key={identity.person_identity_uuid} className="person-chip title-person-chip">
-          <User className="person-chip-icon" aria-hidden="true" />
-          <span className="person-chip-provider">{identity.provider}</span>
-          <span>{label}</span>
-          {renderedRemoveButton}
-        </TitleTag>
-      );
-    }
-
     return (
-      <span key={identity.person_identity_uuid} className="person-chip">
-        <User className="person-chip-icon" aria-hidden="true" />
-        <span className="person-chip-provider">{identity.provider}</span>
+      <span key={identity.person_identity_uuid} className="person-edit-token" title={title}>
         <span>{label}</span>
-        {renderedRemoveButton}
+        <button
+          type="button"
+          className="person-edit-token-remove"
+          onClick={() => {
+            void onRemoveIdentity(articleUUID, identity.person_identity_uuid);
+          }}
+          disabled={mutationKey === removeMutationKey}
+          aria-label={`Remove ${title}`}
+        >
+          <X className="person-chip-remove-icon" aria-hidden="true" />
+        </button>
       </span>
     );
   });
@@ -128,9 +111,8 @@ export function ArticlePersonIdentityEditor({
   const renderedRow = (
     <div
       className={`person-identity-row ${isTitleVariant ? "person-identity-row-title" : ""}`.trim()}
-      aria-label="Article person identities"
+      aria-label="Article person identity controls"
     >
-      {renderedIdentities}
       {isTitleVariant ? (
         <TitleActionButton
           ariaLabel="Add article person identity"
@@ -192,6 +174,7 @@ export function ArticlePersonIdentityEditor({
           renderedRow
         ) : (
           <TitleTagInput className="person-identity-input-shell-title" onMouseDown={clearBlurTimer}>
+            {renderedEditTokens}
             {renderedInput}
           </TitleTagInput>
         )}
@@ -209,7 +192,7 @@ export function ArticlePersonIdentityEditor({
           aria-label="Article person identity input"
           onMouseDown={clearBlurTimer}
         >
-          {renderedIdentities}
+          {renderedEditTokens}
           {renderedInput}
         </div>
       )}

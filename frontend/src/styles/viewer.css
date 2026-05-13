@@ -534,8 +534,40 @@
     @apply mb-0 mt-1.5 font-mono text-[0.74rem] text-panel-400;
   }
 
-  .member-sub-single {
-    @apply mt-2;
+  .article-byline {
+    @apply mt-2 grid min-w-0 items-start;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    column-gap: 0.7rem;
+  }
+
+  .article-byline-avatar {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-panel-500 bg-panel-800 font-mono text-[0.68rem] font-bold text-panel-400;
+  }
+
+  .article-byline-main {
+    @apply min-w-0 pt-[0.18rem];
+  }
+
+  .article-byline-content {
+    @apply min-w-0;
+  }
+
+  .article-byline-identity {
+    @apply flex min-w-0 flex-wrap items-center gap-[0.38rem] text-[0.82rem] leading-tight;
+  }
+
+  .article-byline-name {
+    @apply min-w-0 max-w-full truncate font-semibold text-panel-100;
+  }
+
+  .article-byline-handle,
+  .article-byline-dot,
+  .article-byline-date {
+    @apply shrink-0 text-panel-400;
+  }
+
+  .article-byline-provider-icon {
+    @apply h-3.5 w-3.5 shrink-0 opacity-80;
   }
 
   .member-tag-tools {
@@ -627,10 +659,6 @@
     @apply min-h-[14px] px-1 py-0 text-[0.58rem];
   }
 
-  .person-chip-small {
-    @apply min-h-[14px] gap-0.5 px-1 py-0 text-[0.58rem];
-  }
-
   .tag-chip-removable {
     @apply pl-2;
   }
@@ -699,7 +727,7 @@
   }
 
   .person-identity-input-shell-title {
-    @apply w-[min(320px,72vw)] flex-nowrap justify-start;
+    @apply w-[min(360px,72vw)] justify-start;
   }
 
   .person-identity-input-wrap {
@@ -710,8 +738,12 @@
     @apply min-w-[180px];
   }
 
-  .story-person-row {
-    @apply mt-2 flex flex-wrap gap-1;
+  .person-edit-token {
+    @apply inline-flex min-h-5 shrink-0 items-center gap-0.5 rounded-full border border-panel-500 bg-panel-800 px-1.5 py-[1px] font-mono text-[0.66rem] font-semibold leading-none text-panel-400;
+  }
+
+  .person-edit-token-remove {
+    @apply -mr-0.5 inline-flex h-4 w-4 items-center justify-center border-0 bg-transparent p-0 text-current opacity-70 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35;
   }
 
   .member-decision-inline {

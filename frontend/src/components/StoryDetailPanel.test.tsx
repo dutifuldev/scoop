@@ -295,11 +295,12 @@ describe("StoryDetailPanel", () => {
 
     expect(screen.getAllByText("Solo Story")).toHaveLength(1);
     expect(screen.queryByText(/Collection:/)).not.toBeInTheDocument();
-    expect(screen.getByText(/published .*source-a/)).toBeInTheDocument();
+    expect(screen.getByText("@alice").closest(".article-byline")).not.toBeNull();
+    expect(container.querySelector(".article-byline-avatar")).not.toBeNull();
+    expect(container.querySelector(".article-byline-provider-icon")).not.toBeNull();
     expect(screen.getByRole("link", { name: "solo.example.com" })).toHaveClass("title-action");
     expect(container.querySelector(".detail-title-row .member-tag-tools-title")).not.toBeNull();
-    expect(screen.getByText("@alice").closest(".person-chip")).not.toBeNull();
-    expect(screen.getByText("discord")).toHaveClass("person-chip-provider");
+    expect(screen.queryByText("discord")).not.toBeInTheDocument();
     expect(screen.getByText("i0")).toHaveClass("title-tag");
     expect(screen.getByRole("button", { name: "Add article person identity" })).toHaveClass(
       "title-action",
@@ -345,6 +346,7 @@ describe("StoryDetailPanel", () => {
       ),
     );
 
+    await user.click(screen.getByRole("button", { name: "Add article person identity" }));
     await user.click(screen.getByRole("button", { name: "Remove discord:@alice" }));
     await waitFor(() =>
       expect(removeArticlePersonIdentity).toHaveBeenCalledWith(

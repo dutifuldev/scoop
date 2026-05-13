@@ -6,6 +6,7 @@ import {
   personIdentityLabel,
   primaryPersonIdentity,
 } from "../../lib/identityFormat";
+import { getViewerTimeZone } from "../../lib/viewerTimeZone";
 import { formatBylineDate } from "../../lib/viewerFormat";
 import type { PersonIdentity } from "../../types";
 
@@ -64,7 +65,7 @@ export function ArticleByline({
   const avatarLabel = displayName || handle || fallbackLabel || source || "article";
   const avatarURL = identity?.avatar_url?.trim() || "";
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
-  const bylineDate = formatBylineDate(publishedAt);
+  const bylineDate = formatBylineDate(publishedAt, new Date(), getViewerTimeZone());
 
   useEffect(() => {
     setAvatarLoadFailed(false);

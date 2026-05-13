@@ -101,6 +101,22 @@ describe("buildFeedMetaText", () => {
       /^Feb 14, \d{2}:\d{2} • news\.ycombinator\.com$/,
     );
   });
+
+  it("uses the story published timestamp before legacy seen timestamps", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00Z"));
+
+    const story = makeStory({
+      canonical_url: "https://news.ycombinator.com/item?id=123",
+      published_at: "2026-05-11T01:30:00Z",
+      last_seen_at: "2026-05-10T12:00:00Z",
+      source_count: 1,
+    });
+
+    expect(buildFeedMetaText(story, true)).toMatch(
+      /^May 11, \d{2}:\d{2} • news\.ycombinator\.com$/,
+    );
+  });
 });
 
 describe("formatDateTime", () => {
@@ -142,6 +158,10 @@ describe("formatBylineDate", () => {
 
   it("uses month and day for older dates in the same year", () => {
     expect(formatBylineDate("2026-05-11T10:00:00Z", now)).toBe("May 11");
+  });
+
+  it("formats older dates in the requested timezone", () => {
+    expect(formatBylineDate("2026-05-10T21:55:00Z", now, "Asia/Singapore")).toBe("May 11");
   });
 
   it("adds the year for dates outside the current year", () => {

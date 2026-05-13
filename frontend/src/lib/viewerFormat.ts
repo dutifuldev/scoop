@@ -13,7 +13,15 @@ export function formatCount(value: number | null | undefined): string {
   return Number(value ?? 0).toLocaleString("en-US");
 }
 
-export function formatDateTime(value?: string): string {
+function yearInTimeZone(date: Date, timeZone?: string): number {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date);
+  return Number(formatted);
+}
+
+export function formatDateTime(value?: string, timeZone?: string): string {
   if (!value) {
     return "n/a";
   }
@@ -23,7 +31,7 @@ export function formatDateTime(value?: string): string {
   }
 
   const now = new Date();
-  const sameYear = date.getFullYear() === now.getFullYear();
+  const sameYear = yearInTimeZone(date, timeZone) === yearInTimeZone(now, timeZone);
 
   const options: Intl.DateTimeFormatOptions = sameYear
     ? {
@@ -32,6 +40,7 @@ export function formatDateTime(value?: string): string {
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
+        ...(timeZone ? { timeZone } : {}),
       }
     : {
         month: "short",
@@ -40,12 +49,13 @@ export function formatDateTime(value?: string): string {
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
+        ...(timeZone ? { timeZone } : {}),
       };
 
   return date.toLocaleString("en-US", options);
 }
 
-export function formatBylineDate(value?: string, now = new Date()): string {
+export function formatBylineDate(value?: string, now = new Date(), timeZone?: string): string {
   if (!value) {
     return "";
   }
@@ -69,10 +79,11 @@ export function formatBylineDate(value?: string, now = new Date()): string {
     return `${Math.max(1, Math.floor(diffMs / hourMs))}h`;
   }
 
-  const sameYear = date.getFullYear() === now.getFullYear();
+  const sameYear = yearInTimeZone(date, timeZone) === yearInTimeZone(now, timeZone);
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    ...(timeZone ? { timeZone } : {}),
     ...(sameYear ? {} : { year: "numeric" }),
   });
 }
@@ -184,7 +195,11 @@ export function buildFeedMetaText(story: StoryListItem, includeTimestamp = false
     return sourceText;
   }
 
-  const timestamp = story.representative?.published_at || story.last_seen_at || story.first_seen_at;
+  const timestamp =
+    story.published_at ||
+    story.representative?.published_at ||
+    story.last_seen_at ||
+    story.first_seen_at;
   const timeText = formatDateTime(timestamp);
 
   if (timeText === "n/a") {

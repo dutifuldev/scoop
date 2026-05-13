@@ -17,10 +17,11 @@ import {
   getDesktopFeedWidthPct,
   setDesktopFeedWidthPct,
 } from "./lib/userSettings";
+import { formatViewerDay } from "./lib/viewerTimeZone";
 import { buildStoryFilters } from "./lib/viewerFilters";
 import { formatCount } from "./lib/viewerFormat";
 import { normalizeLanguageTag } from "./lib/language";
-import type { ViewerSearch } from "./types";
+import type { StoryDetailResponse, ViewerSearch } from "./types";
 import { compactViewerSearch, normalizeViewerSearch, toStoryFilters } from "./viewerSearch";
 
 export function StoryViewerPage(): JSX.Element {
@@ -86,17 +87,20 @@ export function StoryViewerPage(): JSX.Element {
     return window.matchMedia("(min-width: 1021px)").matches;
   });
 
-  const compactSearchForCurrentPath = useCallback((nextSearch: ViewerSearch): ViewerSearch => {
-    const keepDateFilters = showAdvancedSearch;
+  const compactSearchForCurrentPath = useCallback(
+    (nextSearch: ViewerSearch): ViewerSearch => {
+      const keepDateFilters = showAdvancedSearch;
 
-    return compactViewerSearch({
-      ...nextSearch,
-      collection: routeCollection ? undefined : nextSearch.collection,
-      day: keepDateFilters ? undefined : nextSearch.day,
-      from: keepDateFilters ? nextSearch.from : undefined,
-      to: keepDateFilters ? nextSearch.to : undefined,
-    });
-  }, [routeCollection, showAdvancedSearch]);
+      return compactViewerSearch({
+        ...nextSearch,
+        collection: routeCollection ? undefined : nextSearch.collection,
+        day: keepDateFilters ? undefined : nextSearch.day,
+        from: keepDateFilters ? nextSearch.from : undefined,
+        to: keepDateFilters ? nextSearch.to : undefined,
+      });
+    },
+    [routeCollection, showAdvancedSearch],
+  );
 
   const clearPassiveStoryURLTimer = useCallback((): void => {
     if (passiveStoryURLTimerRef.current !== null) {
@@ -106,29 +110,42 @@ export function StoryViewerPage(): JSX.Element {
     pendingPassiveStoryUUIDRef.current = "";
   }, []);
 
-  const applySearch = useCallback((nextSearch: ViewerSearch): void => {
-    clearPassiveStoryURLTimer();
-    void navigate({
-      to: ".",
-      search: compactSearchForCurrentPath(nextSearch),
-      replace: true,
-    });
-  }, [clearPassiveStoryURLTimer, compactSearchForCurrentPath, navigate]);
+  const applySearch = useCallback(
+    (nextSearch: ViewerSearch): void => {
+      clearPassiveStoryURLTimer();
+      void navigate({
+        to: ".",
+        search: compactSearchForCurrentPath(nextSearch),
+        replace: true,
+      });
+    },
+    [clearPassiveStoryURLTimer, compactSearchForCurrentPath, navigate],
+  );
 
-  const navigateToStoryPath = useCallback((
-    collection: string,
-    storyUUID: string,
-    itemUUID?: string,
-    options?: { replace?: boolean },
-  ): void => {
-    const currentSearch = compactSearchForCurrentPath(viewerSearch);
-    const replace = options?.replace ?? false;
+  const navigateToStoryPath = useCallback(
+    (
+      collection: string,
+      storyUUID: string,
+      itemUUID?: string,
+      options?: { replace?: boolean },
+    ): void => {
+      const currentSearch = compactSearchForCurrentPath(viewerSearch);
+      const replace = options?.replace ?? false;
 
-    if (collection) {
-      if (itemUUID) {
+      if (collection) {
+        if (itemUUID) {
+          void navigate({
+            to: "/c/$collection/s/$storyUUID/i/$itemUUID",
+            params: { collection, storyUUID, itemUUID },
+            search: currentSearch,
+            replace,
+          });
+          return;
+        }
+
         void navigate({
-          to: "/c/$collection/s/$storyUUID/i/$itemUUID",
-          params: { collection, storyUUID, itemUUID },
+          to: "/c/$collection/s/$storyUUID",
+          params: { collection, storyUUID },
           search: currentSearch,
           replace,
         });
@@ -136,21 +153,14 @@ export function StoryViewerPage(): JSX.Element {
       }
 
       void navigate({
-        to: "/c/$collection/s/$storyUUID",
-        params: { collection, storyUUID },
+        to: "/stories/$storyUUID",
+        params: { storyUUID },
         search: currentSearch,
         replace,
       });
-      return;
-    }
-
-    void navigate({
-      to: "/stories/$storyUUID",
-      params: { storyUUID },
-      search: currentSearch,
-      replace,
-    });
-  }, [compactSearchForCurrentPath, navigate, viewerSearch]);
+    },
+    [compactSearchForCurrentPath, navigate, viewerSearch],
+  );
 
   useEffect(() => {
     setSearchInput(filters.query);
@@ -171,7 +181,13 @@ export function StoryViewerPage(): JSX.Element {
 
   useEffect(() => {
     clearPassiveStoryURLTimer();
-  }, [clearPassiveStoryURLTimer, routeCollection, selectedItemUUID, selectedStoryUUID, viewerSearch]);
+  }, [
+    clearPassiveStoryURLTimer,
+    routeCollection,
+    selectedItemUUID,
+    selectedStoryUUID,
+    viewerSearch,
+  ]);
 
   useEffect(() => {
     if (!showAdvancedSearch && (viewerSearch.from || viewerSearch.to || viewerSearch.tag)) {
@@ -501,6 +517,33 @@ export function StoryViewerPage(): JSX.Element {
     ],
   );
 
+  const onStoryDetailLoaded = useCallback(
+    (detail: StoryDetailResponse): void => {
+      if (
+        showAdvancedSearch ||
+        !selectedStoryUUID ||
+        detail.story.story_uuid !== selectedStoryUUID ||
+        !viewerSearch.day
+      ) {
+        return;
+      }
+
+      const publishedAt =
+        detail.story.published_at || detail.story.representative?.published_at || "";
+      const publishedDay = formatViewerDay(publishedAt);
+      if (!publishedDay || publishedDay === viewerSearch.day) {
+        return;
+      }
+
+      applySearch({
+        ...viewerSearch,
+        day: publishedDay,
+        page: undefined,
+      });
+    },
+    [applySearch, selectedStoryUUID, showAdvancedSearch, viewerSearch],
+  );
+
   useEffect(() => {
     return () => {
       clearPassiveStoryURLTimer();
@@ -611,6 +654,7 @@ export function StoryViewerPage(): JSX.Element {
               readerStateKey={readerStateKey}
               onLoadNextStoryPage={fetchNextStoriesPage}
               onActiveStoryChange={onReaderActiveStoryChange}
+              onStoryDetailLoaded={onStoryDetailLoaded}
               onTranslationStateChange={onTranslationStateChange}
               onScrollTargetSettled={onReaderScrollTargetSettled}
             />

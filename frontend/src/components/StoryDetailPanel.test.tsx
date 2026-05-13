@@ -205,7 +205,8 @@ function makeSingleArticleDetail(): StoryDetailResponse {
             provider: "discord",
             provider_user_id: "123456789012345678",
             handle: "alice",
-            avatar_url: "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
+            avatar_url:
+              "https://cdn.discordapp.com/avatars/123456789012345678/avatar.webp?size=128",
             identity_ref: "id://discord/id/123456789012345678?handle=alice",
             created_at: "2026-02-14T09:00:00Z",
             updated_at: "2026-02-14T09:00:00Z",
@@ -292,10 +293,6 @@ describe("StoryDetailPanel", () => {
     expect(singleIdentityByline).not.toBeNull();
     expect(within(singleIdentityByline as HTMLElement).queryByText(/matched /)).toBeNull();
     expect(within(singleIdentityByline as HTMLElement).queryByText("new_story")).toBeNull();
-    expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
-      "title",
-      expect.stringContaining("Ingested Feb 14,"),
-    );
     expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
       "title",
       expect.stringContaining("Decision: new story"),

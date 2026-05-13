@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { getViewerTimeZone } from "../../lib/viewerTimeZone";
 import { formatDateTime } from "../../lib/viewerFormat";
 import type { StoryArticlePreview, Tag } from "../../types";
 import { ArticleByline } from "./ArticleByline";
@@ -160,9 +161,11 @@ function StoryArticleEntry({
     activeLang !== "" && representativeTranslatedTitle !== ""
       ? representativeTranslatedTitle
       : representativeOriginalTitle;
+  const viewerTimeZone = getViewerTimeZone();
   const bylineDateTitle = [
-    representative.published_at ? `Published ${formatDateTime(representative.published_at)}` : "",
-    representative.matched_at ? `Ingested ${formatDateTime(representative.matched_at)}` : "",
+    representative.published_at
+      ? `Published ${formatDateTime(representative.published_at, viewerTimeZone)}`
+      : "",
     decisionLabel ? `Decision: ${decisionLabel}` : "",
     group.members.length > 1
       ? `Merged ${group.members.length} items from ${group.sourceCount} sources`

@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import { getCollections, getStoryDays, getStories, getTags } from "../api";
+import { getViewerTimeZone } from "../lib/viewerTimeZone";
 import { extractErrorMessage } from "../lib/viewerFormat";
 import type {
   CollectionSummary,
@@ -31,6 +32,8 @@ interface UseViewerQueriesResult {
 }
 
 export function useViewerQueries({ filters }: UseViewerQueriesArgs): UseViewerQueriesResult {
+  const viewerTimeZone = useMemo(() => getViewerTimeZone(), []);
+
   const collectionsQuery = useQuery<{ items: CollectionSummary[] }>({
     queryKey: ["collections"],
     queryFn: () => getCollections(),
@@ -42,8 +45,8 @@ export function useViewerQueries({ filters }: UseViewerQueriesArgs): UseViewerQu
   });
 
   const dayBucketsQuery = useQuery<{ items: StoryDayBucket[] }>({
-    queryKey: ["story-days", filters.collection],
-    queryFn: () => getStoryDays(filters.collection, 45),
+    queryKey: ["story-days", filters.collection, viewerTimeZone],
+    queryFn: () => getStoryDays(filters.collection, 45, viewerTimeZone),
   });
 
   const storiesQuery = useInfiniteQuery<{ items: StoryListItem[]; pagination: StoryPagination }>({
@@ -56,6 +59,7 @@ export function useViewerQueries({ filters }: UseViewerQueriesArgs): UseViewerQu
       filters.pageSize,
       filters.lang,
       filters.tag,
+      viewerTimeZone,
     ],
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>

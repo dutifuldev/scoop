@@ -57,6 +57,7 @@ export interface StoryListItem {
   detected_language: string;
   canonical_url?: string;
   status: string;
+  published_at?: string;
   first_seen_at: string;
   last_seen_at: string;
   source_count: number;

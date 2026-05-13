@@ -40,7 +40,12 @@ function providerIcon(identity: PersonIdentity): JSX.Element | null {
   }
 
   return (
-    <img className="article-byline-provider-icon" src={discordLogoURL} alt="" aria-hidden="true" />
+    <img
+      className="discord-link-icon article-byline-provider-icon"
+      src={discordLogoURL}
+      alt=""
+      aria-hidden="true"
+    />
   );
 }
 

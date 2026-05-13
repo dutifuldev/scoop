@@ -374,6 +374,7 @@
 
   .title-action-icon,
   .title-action .discord-link-icon {
+    display: block;
     width: var(--title-action-icon-size);
     height: var(--title-action-icon-size);
   }
@@ -578,9 +579,7 @@
   }
 
   .article-byline-provider-icon {
-    @apply shrink-0 self-center opacity-80;
-    width: var(--article-byline-icon-size);
-    height: var(--article-byline-icon-size);
+    @apply opacity-80;
   }
 
   .member-tag-tools {
@@ -815,7 +814,7 @@
   }
 
   .discord-link-icon {
-    @apply shrink-0 self-center;
+    @apply block shrink-0 self-center;
     width: var(--title-action-icon-size, 0.875rem);
     height: var(--title-action-icon-size, 0.875rem);
   }

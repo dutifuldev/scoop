@@ -293,8 +293,16 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".detail-title-row")).toBeNull();
     const singleIdentityByline = screen.getByText("@alice").closest(".article-byline");
     expect(singleIdentityByline).not.toBeNull();
-    expect(within(singleIdentityByline as HTMLElement).getByText(/matched /)).toBeInTheDocument();
-    expect(within(singleIdentityByline as HTMLElement).getByText("new_story")).toBeInTheDocument();
+    expect(within(singleIdentityByline as HTMLElement).queryByText(/matched /)).toBeNull();
+    expect(within(singleIdentityByline as HTMLElement).queryByText("new_story")).toBeNull();
+    expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Ingested Feb 14, 17:00"),
+    );
+    expect(within(singleIdentityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Decision: new story"),
+    );
     const singleArticleTitle = within(singleIdentityByline as HTMLElement).getByText("Solo Story");
     expect(singleArticleTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
@@ -399,8 +407,12 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByText("Second item")).toBeInTheDocument();
     const identityByline = screen.getByText("@alice").closest(".article-byline");
     expect(identityByline).not.toBeNull();
-    expect(within(identityByline as HTMLElement).getByText(/matched /)).toBeInTheDocument();
-    expect(within(identityByline as HTMLElement).getByText("auto_merge")).toBeInTheDocument();
+    expect(within(identityByline as HTMLElement).queryByText(/matched /)).toBeNull();
+    expect(within(identityByline as HTMLElement).queryByText("auto_merge")).toBeNull();
+    expect(within(identityByline as HTMLElement).getByText("Feb 14")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Decision: auto merge"),
+    );
     const inlineMemberTitle = within(identityByline as HTMLElement).getByText("First item");
     expect(inlineMemberTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(

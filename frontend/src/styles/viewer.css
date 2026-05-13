@@ -338,7 +338,7 @@
 
   .title-actions {
     --title-action-size: 1.35rem;
-    --title-action-icon-size: 0.75rem;
+    --title-action-icon-size: 0.875rem;
     --title-action-gap: 0.375rem;
     @apply flex min-w-0 max-w-full flex-wrap items-start;
     column-gap: var(--title-action-gap);
@@ -562,6 +562,7 @@
 
   .article-byline-identity {
     @apply flex min-w-0 flex-wrap items-center gap-[0.38rem] text-[0.92rem] leading-[1.6] text-panel-100;
+    --article-byline-icon-size: var(--title-action-icon-size, 0.875rem);
   }
 
   .article-byline-name {
@@ -577,12 +578,10 @@
     @apply shrink-0 text-panel-400;
   }
 
-  .article-byline-meta-item {
-    @apply inline-flex shrink-0 items-center gap-[0.38rem] text-panel-400;
-  }
-
   .article-byline-provider-icon {
-    @apply h-3.5 w-3.5 shrink-0 opacity-80;
+    @apply shrink-0 self-center opacity-80;
+    width: var(--article-byline-icon-size);
+    height: var(--article-byline-icon-size);
   }
 
   .member-tag-tools {
@@ -817,7 +816,9 @@
   }
 
   .discord-link-icon {
-    @apply h-3.5 w-3.5 shrink-0;
+    @apply shrink-0 self-center;
+    width: var(--title-action-icon-size, 0.875rem);
+    height: var(--title-action-icon-size, 0.875rem);
   }
 
   .member-expanded-content {

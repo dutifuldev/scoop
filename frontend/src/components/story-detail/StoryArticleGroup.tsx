@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 
 import { hasActivePersonIdentity } from "../../lib/identityFormat";
 import { buildMemberSubtitle, formatDateTime } from "../../lib/viewerFormat";
@@ -81,6 +81,7 @@ export function StoryArticleGroup({
   const decisionText = representative.dedup_decision
     ? representative.dedup_decision.toLowerCase()
     : "";
+  const decisionLabel = decisionText.replace(/_/g, " ");
 
   const previewTexts = group.members
     .map((member) => itemPreviewByUUID[member.story_article_uuid]?.preview_text?.trim() ?? "")
@@ -169,15 +170,16 @@ export function StoryArticleGroup({
       onRemoveArticleTag={onRemoveArticleTag}
     />
   );
-  const bylineMetaItems: ReactNode[] = [
-    <span>matched {formatDateTime(representative.matched_at)}</span>,
-    decisionText ? <span className="member-decision-inline">{decisionText}</span> : null,
-    group.members.length > 1 ? (
-      <span>
-        merged {group.members.length} items from {group.sourceCount} sources
-      </span>
-    ) : null,
-  ];
+  const bylineDateTitle = [
+    representative.published_at ? `Published ${formatDateTime(representative.published_at)}` : "",
+    representative.matched_at ? `Ingested ${formatDateTime(representative.matched_at)}` : "",
+    decisionLabel ? `Decision: ${decisionLabel}` : "",
+    group.members.length > 1
+      ? `Merged ${group.members.length} items from ${group.sourceCount} sources`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const renderedArticleContent = (
     <article
       className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
@@ -230,7 +232,7 @@ export function StoryArticleGroup({
         identities={representative.person_identities ?? []}
         publishedAt={representative.published_at}
         source={representative.source}
-        metaItems={bylineMetaItems}
+        dateTitle={bylineDateTitle}
       >
         {shouldPlaceTitleInByline ? (
           <div className="article-byline-title-stack">
@@ -255,13 +257,17 @@ export function StoryArticleGroup({
                   const memberDecision = groupMember.dedup_decision
                     ? groupMember.dedup_decision.toLowerCase()
                     : "";
+                  const memberDecisionLabel = memberDecision.replace(/_/g, " ");
                   const isSelected = selectedItemUUID === groupMember.story_article_uuid;
-                  const memberBylineMetaItems: ReactNode[] = [
-                    <span>matched {formatDateTime(groupMember.matched_at)}</span>,
-                    memberDecision ? (
-                      <span className="member-decision-inline">{memberDecision}</span>
-                    ) : null,
-                  ];
+                  const memberBylineDateTitle = [
+                    groupMember.published_at
+                      ? `Published ${formatDateTime(groupMember.published_at)}`
+                      : "",
+                    groupMember.matched_at ? `Ingested ${formatDateTime(groupMember.matched_at)}` : "",
+                    memberDecisionLabel ? `Decision: ${memberDecisionLabel}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
 
                   return (
                     <li
@@ -279,7 +285,7 @@ export function StoryArticleGroup({
                         identities={groupMember.person_identities ?? []}
                         publishedAt={groupMember.published_at}
                         source={groupMember.source}
-                        metaItems={memberBylineMetaItems}
+                        dateTitle={memberBylineDateTitle}
                       />
                       <ArticleTagEditor
                         articleUUID={groupMember.article_uuid}

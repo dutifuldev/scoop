@@ -13,7 +13,7 @@ interface ArticleBylineProps {
   identities?: PersonIdentity[];
   publishedAt?: string;
   source?: string;
-  metaItems?: ReactNode[];
+  dateTitle?: string;
   children?: ReactNode;
 }
 
@@ -47,7 +47,7 @@ export function ArticleByline({
   identities = [],
   publishedAt,
   source = "",
-  metaItems = [],
+  dateTitle = "",
   children,
 }: ArticleBylineProps): JSX.Element {
   const identity = primaryPersonIdentity(identities);
@@ -76,21 +76,11 @@ export function ArticleByline({
               <span className="article-byline-dot" aria-hidden="true">
                 &middot;
               </span>
-              <time className="article-byline-date" dateTime={publishedAt}>
+              <time className="article-byline-date" dateTime={publishedAt} title={dateTitle}>
                 {bylineDate}
               </time>
             </>
           ) : null}
-          {metaItems.map((item, index) =>
-            item ? (
-              <span className="article-byline-meta-item" key={index}>
-                <span className="article-byline-dot" aria-hidden="true">
-                  &middot;
-                </span>
-                {item}
-              </span>
-            ) : null,
-          )}
         </div>
         {children ? <div className="article-byline-content">{children}</div> : null}
       </div>

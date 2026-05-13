@@ -169,23 +169,15 @@ export function StoryArticleGroup({
       onRemoveArticleTag={onRemoveArticleTag}
     />
   );
-  const memberMetadata: ReactNode = (
-    <p className="member-sub">
-      matched {formatDateTime(representative.matched_at)}
-      {decisionText ? (
-        <>
-          {" "}
-          • <span className="member-decision-inline">{decisionText}</span>
-        </>
-      ) : null}
-      {group.members.length > 1 ? (
-        <>
-          {" "}
-          • merged {group.members.length} items from {group.sourceCount} sources
-        </>
-      ) : null}
-    </p>
-  );
+  const bylineMetaItems: ReactNode[] = [
+    <span>matched {formatDateTime(representative.matched_at)}</span>,
+    decisionText ? <span className="member-decision-inline">{decisionText}</span> : null,
+    group.members.length > 1 ? (
+      <span>
+        merged {group.members.length} items from {group.sourceCount} sources
+      </span>
+    ) : null,
+  ];
   const renderedArticleContent = (
     <article
       className={`detail-item-content member-expanded-content ${!isMergedStory ? "detail-item-content-single" : ""}`.trim()}
@@ -232,20 +224,17 @@ export function StoryArticleGroup({
       className={`member-card ${isExpanded ? "member-card-expanded" : ""} ${!isMergedStory ? "member-card-single" : ""}`.trim()}
     >
       {isMergedStory && !shouldPlaceTitleInByline ? (
-        <>
-          {renderMemberTitleRow()}
-          {memberMetadata}
-        </>
+        renderMemberTitleRow()
       ) : null}
       <ArticleByline
         identities={representative.person_identities ?? []}
         publishedAt={representative.published_at}
         source={representative.source}
+        metaItems={bylineMetaItems}
       >
         {shouldPlaceTitleInByline ? (
           <div className="article-byline-title-stack">
             {renderMemberTitleRow("member-title-row-byline")}
-            {memberMetadata}
           </div>
         ) : null}
         {isExpanded ? (
@@ -267,6 +256,12 @@ export function StoryArticleGroup({
                     ? groupMember.dedup_decision.toLowerCase()
                     : "";
                   const isSelected = selectedItemUUID === groupMember.story_article_uuid;
+                  const memberBylineMetaItems: ReactNode[] = [
+                    <span>matched {formatDateTime(groupMember.matched_at)}</span>,
+                    memberDecision ? (
+                      <span className="member-decision-inline">{memberDecision}</span>
+                    ) : null,
+                  ];
 
                   return (
                     <li
@@ -280,19 +275,11 @@ export function StoryArticleGroup({
                       >
                         {buildMemberSubtitle(groupMember)}
                       </button>
-                      <p className="member-sub">
-                        matched {formatDateTime(groupMember.matched_at)}
-                        {memberDecision ? (
-                          <>
-                            {" "}
-                            • <span className="member-decision-inline">{memberDecision}</span>
-                          </>
-                        ) : null}
-                      </p>
                       <ArticleByline
                         identities={groupMember.person_identities ?? []}
                         publishedAt={groupMember.published_at}
                         source={groupMember.source}
+                        metaItems={memberBylineMetaItems}
                       />
                       <ArticleTagEditor
                         articleUUID={groupMember.article_uuid}

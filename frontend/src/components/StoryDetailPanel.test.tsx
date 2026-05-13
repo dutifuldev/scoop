@@ -293,6 +293,8 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".detail-title-row")).toBeNull();
     const singleIdentityByline = screen.getByText("@alice").closest(".article-byline");
     expect(singleIdentityByline).not.toBeNull();
+    expect(within(singleIdentityByline as HTMLElement).getByText(/matched /)).toBeInTheDocument();
+    expect(within(singleIdentityByline as HTMLElement).getByText("new_story")).toBeInTheDocument();
     const singleArticleTitle = within(singleIdentityByline as HTMLElement).getByText("Solo Story");
     expect(singleArticleTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(
@@ -318,6 +320,7 @@ describe("StoryDetailPanel", () => {
     expect(container.querySelector(".detail-text-block-single")).not.toBeNull();
     expect(container.querySelector(".member-toggle")).toBeNull();
     expect(container.querySelector(".member-expanded-url")).toBeNull();
+    expect(container.querySelector(".member-sub")).toBeNull();
 
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -396,6 +399,8 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByText("Second item")).toBeInTheDocument();
     const identityByline = screen.getByText("@alice").closest(".article-byline");
     expect(identityByline).not.toBeNull();
+    expect(within(identityByline as HTMLElement).getByText(/matched /)).toBeInTheDocument();
+    expect(within(identityByline as HTMLElement).getByText("auto_merge")).toBeInTheDocument();
     const inlineMemberTitle = within(identityByline as HTMLElement).getByText("First item");
     expect(inlineMemberTitle.closest(".article-byline-title-stack")).not.toBeNull();
     expect(

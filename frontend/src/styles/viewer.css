@@ -534,10 +534,6 @@
     overflow: hidden;
   }
 
-  .member-sub {
-    @apply mb-0 mt-1.5 font-mono text-[0.74rem] text-panel-400;
-  }
-
   .article-byline {
     @apply mt-2 grid min-w-0 items-start;
     grid-template-columns: 2.5rem minmax(0, 1fr);
@@ -579,6 +575,10 @@
   .article-byline-dot,
   .article-byline-date {
     @apply shrink-0 text-panel-400;
+  }
+
+  .article-byline-meta-item {
+    @apply inline-flex shrink-0 items-center gap-[0.38rem] text-panel-400;
   }
 
   .article-byline-provider-icon {
@@ -981,7 +981,6 @@
   }
 
   .app-root-viewer .story-meta,
-  .app-root-viewer .member-sub,
   .app-root-viewer .decision-pill {
     @apply mt-1;
   }

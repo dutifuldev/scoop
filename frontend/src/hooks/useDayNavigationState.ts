@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { toDayString } from "../lib/day";
 import { formatCalendarDay, formatRelativeDay } from "../lib/viewerFormat";
 import type { DayNavigationState, StoryDayBucket } from "../types";
 
@@ -26,11 +27,14 @@ export function useDayNavigationState({
 
   const dayNav = useMemo<DayNavigationState>(() => {
     const customRangeActive = Boolean((from || to) && !rangeDay);
-    const navigatorDay = selectedDay || dayBuckets[0]?.day || "";
-    const currentIndex = navigatorDay ? dayBuckets.findIndex((bucket) => bucket.day === navigatorDay) : -1;
+    const navigatorDay = selectedDay || dayBuckets[0]?.day || toDayString(new Date());
+    const currentIndex = navigatorDay
+      ? dayBuckets.findIndex((bucket) => bucket.day === navigatorDay)
+      : -1;
 
-    const canGoOlder = !customRangeActive && currentIndex >= 0 && currentIndex < dayBuckets.length - 1;
-    const canGoNewer = !customRangeActive && currentIndex > 0;
+    const today = toDayString(new Date());
+    const canGoOlder = !customRangeActive && navigatorDay !== "";
+    const canGoNewer = !customRangeActive && navigatorDay !== "" && navigatorDay < today;
 
     let currentLabel = "Pick a day";
     let relativeLabel = "No story days yet. Pick a date from the calendar.";

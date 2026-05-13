@@ -17,6 +17,7 @@ import {
   getDesktopFeedWidthPct,
   setDesktopFeedWidthPct,
 } from "./lib/userSettings";
+import { addCalendarDays } from "./lib/day";
 import { formatViewerDay } from "./lib/viewerTimeZone";
 import { buildStoryFilters } from "./lib/viewerFilters";
 import { formatCount } from "./lib/viewerFormat";
@@ -384,16 +385,7 @@ export function StoryViewerPage(): JSX.Element {
   }
 
   function moveDay(offset: number): void {
-    if (dayNav.currentIndex < 0) {
-      return;
-    }
-
-    const nextIndex = dayNav.currentIndex + offset;
-    if (nextIndex < 0 || nextIndex >= dayBuckets.length) {
-      return;
-    }
-
-    const nextDay = dayBuckets[nextIndex]?.day;
+    const nextDay = addCalendarDays(dayNav.navigatorDay, offset);
     if (!nextDay) {
       return;
     }
@@ -593,8 +585,8 @@ export function StoryViewerPage(): JSX.Element {
     <DayNavigator
       dayNav={dayNav}
       pickerDay={pickerDay}
-      onMoveOlder={() => moveDay(1)}
-      onMoveNewer={() => moveDay(-1)}
+      onMoveOlder={() => moveDay(-1)}
+      onMoveNewer={() => moveDay(1)}
       onSelectDay={setSingleDayFilter}
     />
   );

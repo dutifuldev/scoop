@@ -6,6 +6,36 @@ import (
 	"strings"
 )
 
+type rootCommand struct {
+	names []string
+	run   func([]string) int
+}
+
+var rootCommands = []rootCommand{
+	{names: []string{"stories"}, run: runStories},
+	{names: []string{"stats"}, run: runStats},
+	{names: []string{"story"}, run: runStoryDetail},
+	{names: []string{"delete"}, run: runDelete},
+	{names: []string{"update"}, run: runUpdate},
+	{names: []string{"restore"}, run: runRestore},
+	{names: []string{"collections"}, run: runCollections},
+	{names: []string{"search"}, run: runSearch},
+	{names: []string{"articles"}, run: runArticles},
+	{names: []string{"tags"}, run: runTags},
+	{names: []string{"person-identities"}, run: runPersonIdentities},
+	{names: []string{"digest"}, run: runDigest},
+	{names: []string{"health"}, run: runHealth},
+	{names: []string{"ingest"}, run: runIngest},
+	{names: []string{"validate"}, run: runValidate},
+	{names: []string{"normalize"}, run: runNormalize},
+	{names: []string{"embed"}, run: runEmbed},
+	{names: []string{"translate"}, run: runTranslate},
+	{names: []string{"dedup"}, run: runDedup},
+	{names: []string{"process", "run-once"}, run: runProcess},
+	{names: []string{"serve"}, run: runServe},
+	{names: []string{"daemon"}, run: runDaemon},
+}
+
 // Run executes the CLI command and returns a process exit code.
 func Run(args []string) int {
 	if len(args) == 0 {
@@ -13,59 +43,50 @@ func Run(args []string) int {
 		return 2
 	}
 
-	switch strings.ToLower(strings.TrimSpace(args[0])) {
-	case "help", "--help", "-h":
+	commandName := normalizeCommandName(args[0])
+	if isHelpCommand(commandName) {
 		printUsage()
 		return 0
-	case "stories":
-		return runStories(args[1:])
-	case "stats":
-		return runStats(args[1:])
-	case "story":
-		return runStoryDetail(args[1:])
-	case "delete":
-		return runDelete(args[1:])
-	case "update":
-		return runUpdate(args[1:])
-	case "restore":
-		return runRestore(args[1:])
-	case "collections":
-		return runCollections(args[1:])
-	case "search":
-		return runSearch(args[1:])
-	case "articles":
-		return runArticles(args[1:])
-	case "tags":
-		return runTags(args[1:])
-	case "person-identities":
-		return runPersonIdentities(args[1:])
-	case "digest":
-		return runDigest(args[1:])
-	case "health":
-		return runHealth(args[1:])
-	case "ingest":
-		return runIngest(args[1:])
-	case "validate":
-		return runValidate(args[1:])
-	case "normalize":
-		return runNormalize(args[1:])
-	case "embed":
-		return runEmbed(args[1:])
-	case "translate":
-		return runTranslate(args[1:])
-	case "dedup":
-		return runDedup(args[1:])
-	case "process", "run-once":
-		return runProcess(args[1:])
-	case "serve":
-		return runServe(args[1:])
-	case "daemon":
-		return runDaemon(args[1:])
-	default:
+	}
+
+	command, ok := findRootCommand(commandName)
+	if !ok {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
 		printUsage()
 		return 2
 	}
+	return command.run(args[1:])
+}
+
+func normalizeCommandName(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func isHelpCommand(name string) bool {
+	switch name {
+	case "help", "--help", "-h":
+		return true
+	default:
+		return false
+	}
+}
+
+func findRootCommand(name string) (rootCommand, bool) {
+	for _, command := range rootCommands {
+		if command.matches(name) {
+			return command, true
+		}
+	}
+	return rootCommand{}, false
+}
+
+func (c rootCommand) matches(name string) bool {
+	for _, candidate := range c.names {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }
 
 func printUsage() {

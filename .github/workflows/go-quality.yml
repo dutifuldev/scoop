@@ -1,0 +1,36 @@
+name: Go Quality Gates
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+jobs:
+  backend-quality:
+    name: Backend Slophammer Gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Static Slophammer check
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check .
+
+      - name: DRY check
+        working-directory: backend
+        run: ./scripts/check-go-dry.sh
+
+      - name: CRAP check
+        working-directory: backend
+        run: ./scripts/check-go-crap.sh
+
+      - name: Mutation smoke check
+        working-directory: backend
+        run: ./scripts/check-go-mutation.sh

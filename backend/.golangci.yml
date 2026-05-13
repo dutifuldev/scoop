@@ -12,4 +12,8 @@ linters:
     - staticcheck
     - unused
     - errcheck
+    - gocyclo
 
+linters-settings:
+  gocyclo:
+    min-complexity: 30

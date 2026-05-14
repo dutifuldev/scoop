@@ -394,8 +394,12 @@
     min-width: var(--title-action-size);
   }
 
+  .title-source-link-github-icon {
+    @apply shrink-0;
+  }
+
   .title-source-link-number {
-    @apply font-mono text-[0.75rem] font-semibold leading-none text-panel-100;
+    @apply font-mono text-[0.75rem] font-semibold leading-none text-panel-400;
   }
 
   .title-action-button {

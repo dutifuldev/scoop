@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import discordLogoURL from "../../assets/discord.svg";
+import githubLogoURL from "../../assets/github.svg";
 import {
   cleanIdentityHandle,
   personIdentityLabel,
@@ -35,14 +36,20 @@ function initialsFor(label: string): string {
 }
 
 function providerIcon(identity: PersonIdentity): JSX.Element | null {
-  if (identity.provider.toLowerCase() !== "discord") {
+  const provider = identity.provider.toLowerCase();
+  const iconURLByProvider: Record<string, string> = {
+    discord: discordLogoURL,
+    github: githubLogoURL,
+  };
+  const iconURL = iconURLByProvider[provider];
+  if (!iconURL) {
     return null;
   }
 
   return (
     <img
-      className="discord-link-icon article-byline-provider-icon"
-      src={discordLogoURL}
+      className={`discord-link-icon article-byline-provider-icon ${provider}-provider-icon`}
+      src={iconURL}
       alt=""
       aria-hidden="true"
     />

@@ -358,6 +358,48 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByLabelText("Article tag search")).toBeInTheDocument();
   });
 
+  it("renders github identities with the github provider icon", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeSingleArticleDetail();
+    detail.members[0].person_identities = [
+      {
+        person_identity_id: 31,
+        person_identity_uuid: "person-identity-uuid-github-1",
+        provider: "github",
+        handle: "joshavant",
+        identity_ref: "id://github/handle/joshavant",
+        created_at: "2026-02-14T09:00:00Z",
+        updated_at: "2026-02-14T09:00:00Z",
+      },
+    ];
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[]}
+          activeLang=""
+          isLoading={false}
+          error=""
+        />
+      </QueryClientProvider>,
+    );
+
+    const byline = (await screen.findByText("@joshavant")).closest(".article-byline");
+    expect(byline).not.toBeNull();
+    const providerIcon = container.querySelector(".article-byline-provider-icon");
+    expect(providerIcon).not.toBeNull();
+    expect(providerIcon).toHaveClass("github-provider-icon");
+    expect(providerIcon).toHaveAttribute("src", expect.stringContaining("github.svg"));
+    expect(screen.queryByText("github")).not.toBeInTheDocument();
+  });
+
   it("renders merged-story member titles with inline source links", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {

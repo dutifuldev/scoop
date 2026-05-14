@@ -1,7 +1,9 @@
 import type { CSSProperties, MouseEventHandler, ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
-import { DiscordMessageLink, discordMessagePattern, labelForURL } from "./storyTextRendering";
+import githubLogoURL from "../../assets/github.svg";
+import { classifySourceLink } from "../../lib/sourceLinks";
+import { DiscordMessageLink } from "./storyTextRendering";
 
 interface TitleActionsProps {
   children: ReactNode;
@@ -137,27 +139,56 @@ export function TitleSourceLink({ url }: TitleSourceLinkProps): JSX.Element | nu
     return null;
   }
 
-  const label = labelForURL(trimmedURL);
-  if (discordMessagePattern.test(trimmedURL)) {
+  const sourceLink = classifySourceLink(trimmedURL);
+  if (sourceLink.kind === "discord-message") {
     return (
       <DiscordMessageLink
         url={trimmedURL}
-        label={label}
+        label={sourceLink.label}
         className="title-action title-action-link title-source-link title-source-link-discord"
         compact
       />
     );
   }
 
+  if (
+    sourceLink.kind === "github-issue" ||
+    sourceLink.kind === "github-pr" ||
+    sourceLink.kind === "github"
+  ) {
+    const numberedLink = sourceLink.kind === "github-issue" || sourceLink.kind === "github-pr";
+    return (
+      <TitleActionLink
+        href={sourceLink.url}
+        label={sourceLink.label}
+        title={sourceLink.url}
+        className={`title-source-link title-source-link-github ${
+          numberedLink ? "title-source-link-github-numbered" : ""
+        }`.trim()}
+      >
+        <img
+          className="title-action-icon title-source-link-icon title-source-link-github-icon"
+          src={githubLogoURL}
+          alt=""
+          aria-hidden="true"
+        />
+        {numberedLink ? (
+          <span className="title-source-link-number">#{sourceLink.number}</span>
+        ) : null}
+        <span className="sr-only">{sourceLink.label}</span>
+      </TitleActionLink>
+    );
+  }
+
   return (
     <TitleActionLink
       href={trimmedURL}
-      label={label}
+      label={sourceLink.label}
       title={trimmedURL}
       className="title-source-link"
     >
       <ExternalLink className="title-action-icon title-source-link-icon" aria-hidden="true" />
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{sourceLink.label}</span>
     </TitleActionLink>
   );
 }

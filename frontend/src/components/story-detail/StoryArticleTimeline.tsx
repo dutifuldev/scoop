@@ -115,8 +115,19 @@ function StoryArticleEntry({
     : "";
   const decisionLabel = decisionText.replace(/_/g, " ");
 
-  const previewTexts = group.members
-    .map((member) => itemPreviewByUUID[member.story_article_uuid]?.preview_text?.trim() ?? "")
+  const previews = group.members
+    .map((member) => itemPreviewByUUID[member.story_article_uuid])
+    .filter((preview): preview is StoryArticlePreview => Boolean(preview?.preview_text?.trim()));
+  const previewTexts = previews
+    .map((preview) => preview.preview_text.trim())
+    .filter((text) => text.length > 0);
+  const completePreviewTexts = previews
+    .filter((preview) => !preview.truncated)
+    .map((preview) => preview.preview_text.trim())
+    .filter((text) => text.length > 0);
+  const truncatedPreviewTexts = previews
+    .filter((preview) => preview.truncated)
+    .map((preview) => preview.preview_text.trim())
     .filter((text) => text.length > 0);
   const originalTexts = group.members
     .map((member) => member.original_text?.trim() || member.normalized_text?.trim() || "")
@@ -125,7 +136,8 @@ function StoryArticleEntry({
     .map((member) => member.translated_text?.trim() ?? "")
     .filter((text) => text.length > 0);
 
-  const resolvedOriginalText = previewTexts[0] || originalTexts[0] || "";
+  const resolvedOriginalText =
+    completePreviewTexts[0] || originalTexts[0] || truncatedPreviewTexts[0] || "";
   const resolvedTranslatedText = translatedTexts[0] || "";
   const originalParagraphs = toParagraphs(resolvedOriginalText);
   const translatedParagraphs = toParagraphs(resolvedTranslatedText);

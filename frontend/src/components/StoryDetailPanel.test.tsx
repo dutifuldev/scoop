@@ -12,15 +12,19 @@ import {
 import { StoryDetailPanel } from "./StoryDetailPanel";
 import type { StoryDetailResponse } from "../types";
 
-vi.mock("../api", () => ({
-  addArticleTag: vi.fn(async () => undefined),
-  getStoryArticlePreview: vi.fn(async (storyMemberUUID: string, _maxChars = 4000) => ({
+const { defaultStoryArticlePreviewMock } = vi.hoisted(() => ({
+  defaultStoryArticlePreviewMock: async (storyMemberUUID: string, _maxChars = 4000) => ({
     story_article_uuid: storyMemberUUID,
     preview_text: `Fetched preview for ${storyMemberUUID}.\n\nSecond paragraph for ${storyMemberUUID}.`,
     source: "normalized_text",
     char_count: 64,
     truncated: false,
-  })),
+  }),
+}));
+
+vi.mock("../api", () => ({
+  addArticleTag: vi.fn(async () => undefined),
+  getStoryArticlePreview: vi.fn(defaultStoryArticlePreviewMock),
   removeArticleTag: vi.fn(async () => undefined),
   requestTranslation: vi.fn(async () => ({
     stats: { total: 1, translated: 1, cached: 0, skipped: 0 },
@@ -221,6 +225,7 @@ function makeSingleArticleDetail(): StoryDetailResponse {
 describe("StoryDetailPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getStoryArticlePreview).mockImplementation(defaultStoryArticlePreviewMock);
   });
 
   it("renders article previews when a story is opened", async () => {
@@ -473,6 +478,56 @@ describe("StoryDetailPanel", () => {
     await user.click(showMore);
     expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
     expect(screen.getByText(/Tail marker/)).toBeInTheDocument();
+  });
+
+  it("expands complete captured article text instead of a capped preview", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const capturedText = `Captured start. ${"Captured article content. ".repeat(190)}Captured tail marker.`;
+    const cappedPreview = `Preview start. ${"Fetched page text. ".repeat(190)}Preview cutoff marker...`;
+    const detail = makeSingleArticleDetail();
+    detail.members[0] = {
+      ...detail.members[0],
+      normalized_text: capturedText,
+      original_text: capturedText,
+    };
+    vi.mocked(getStoryArticlePreview).mockImplementationOnce(async (storyMemberUUID: string) => ({
+      story_article_uuid: storyMemberUUID,
+      preview_text: cappedPreview,
+      source: "reader",
+      char_count: cappedPreview.length,
+      truncated: true,
+    }));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[]}
+          activeLang=""
+          isLoading={false}
+          error=""
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(getStoryArticlePreview)).toHaveBeenCalledWith("single-member-1", 4000);
+      expect(screen.queryByText(/Preview start/)).toBeNull();
+    });
+
+    const showMore = await screen.findByRole("button", { name: "Show more" });
+    expect(screen.queryByText(/Captured tail marker/)).toBeNull();
+    await user.click(showMore);
+    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
+    expect(screen.getByText(/Captured tail marker/)).toBeInTheDocument();
+    expect(screen.queryByText(/Preview cutoff marker/)).toBeNull();
   });
 
   it("does not show the article expansion control based on element dimensions", async () => {

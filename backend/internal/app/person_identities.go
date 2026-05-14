@@ -80,7 +80,7 @@ func runPersonIdentitiesRefreshAvatar(args []string) int {
 		fmt.Fprintf(os.Stderr, "Failed to show person identity: %v\n", err)
 		return 1
 	}
-	avatarURL, err := resolveDiscordAvatarURL(ctx, identity)
+	avatarURL, err := resolvePersonIdentityAvatarURL(ctx, identity)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to refresh avatar: %v\n", err)
 		return 1
@@ -112,8 +112,9 @@ func runPersonIdentitiesRefreshAvatars(args []string) int {
 		fmt.Fprintln(os.Stderr, "person-identities refresh-avatars does not accept positional arguments")
 		return 2
 	}
-	if strings.ToLower(strings.TrimSpace(*provider)) != "discord" {
-		fmt.Fprintln(os.Stderr, "only discord avatar refresh is supported")
+	normalizedProvider := strings.ToLower(strings.TrimSpace(*provider))
+	if normalizedProvider != "discord" && normalizedProvider != "github" {
+		fmt.Fprintln(os.Stderr, "only discord and github avatar refresh are supported")
 		return 2
 	}
 	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
@@ -130,10 +131,10 @@ func runPersonIdentitiesRefreshAvatars(args []string) int {
 	}
 	updated := make([]db.PersonIdentityRecord, 0, len(identities))
 	for _, identity := range identities {
-		if strings.ToLower(identity.Provider) != "discord" {
+		if strings.ToLower(identity.Provider) != normalizedProvider {
 			continue
 		}
-		avatarURL, err := resolveDiscordAvatarURL(ctx, &identity)
+		avatarURL, err := resolvePersonIdentityAvatarURL(ctx, &identity)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to refresh avatar for %s: %v\n", identity.IdentityRef, err)
 			return 1
@@ -163,7 +164,46 @@ type discordUserResponse struct {
 	Avatar *string `json:"avatar"`
 }
 
-func resolveDiscordAvatarURL(ctx context.Context, identity *db.PersonIdentityRecord) (*string, error) {
+type githubUserResponse struct {
+	AvatarURL string `json:"avatar_url"`
+}
+
+type avatarResolver struct {
+	httpClient       *http.Client
+	githubAPIBaseURL string
+}
+
+var defaultAvatarResolver = avatarResolver{
+	httpClient:       http.DefaultClient,
+	githubAPIBaseURL: "https://api.github.com",
+}
+
+func resolvePersonIdentityAvatarURL(ctx context.Context, identity *db.PersonIdentityRecord) (*string, error) {
+	return defaultAvatarResolver.resolve(ctx, identity)
+}
+
+func (r avatarResolver) resolve(ctx context.Context, identity *db.PersonIdentityRecord) (*string, error) {
+	if identity == nil {
+		return nil, fmt.Errorf("person identity is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(identity.Provider)) {
+	case "discord":
+		return r.resolveDiscord(ctx, identity)
+	case "github":
+		return r.resolveGitHub(ctx, identity)
+	default:
+		return nil, fmt.Errorf("avatar refresh is not supported for provider %q", identity.Provider)
+	}
+}
+
+func (r avatarResolver) client() *http.Client {
+	if r.httpClient != nil {
+		return r.httpClient
+	}
+	return http.DefaultClient
+}
+
+func (r avatarResolver) resolveDiscord(ctx context.Context, identity *db.PersonIdentityRecord) (*string, error) {
 	if identity == nil {
 		return nil, fmt.Errorf("person identity is required")
 	}
@@ -184,7 +224,7 @@ func resolveDiscordAvatarURL(ctx context.Context, identity *db.PersonIdentityRec
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	req.Header.Set("User-Agent", "scoop-avatar-refresh/1.0")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.client().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch Discord user: %w", err)
 	}
@@ -202,6 +242,68 @@ func resolveDiscordAvatarURL(ctx context.Context, identity *db.PersonIdentityRec
 	avatarHash := strings.TrimSpace(*user.Avatar)
 	avatarURL := fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.webp?size=128", userID, avatarHash)
 	return &avatarURL, nil
+}
+
+func (r avatarResolver) resolveGitHub(ctx context.Context, identity *db.PersonIdentityRecord) (*string, error) {
+	if identity == nil {
+		return nil, fmt.Errorf("person identity is required")
+	}
+	if strings.ToLower(identity.Provider) != "github" {
+		return nil, fmt.Errorf("identity provider must be github")
+	}
+	if identity.Handle == nil || strings.TrimSpace(*identity.Handle) == "" {
+		return nil, fmt.Errorf("github identity must include handle")
+	}
+	handle := strings.TrimSpace(*identity.Handle)
+	if !isValidGitHubHandle(handle) {
+		return nil, fmt.Errorf("invalid github handle %q", handle)
+	}
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(r.githubAPIBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = "https://api.github.com"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBaseURL+"/users/"+handle, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "scoop-avatar-refresh/1.0")
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := r.client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch GitHub user: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("fetch GitHub user returned HTTP %d", resp.StatusCode)
+	}
+	var user githubUserResponse
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("decode GitHub user: %w", err)
+	}
+	avatarURL := strings.TrimSpace(user.AvatarURL)
+	if avatarURL == "" {
+		return nil, nil
+	}
+	return &avatarURL, nil
+}
+
+func isValidGitHubHandle(handle string) bool {
+	if len(handle) == 0 || len(handle) > 39 {
+		return false
+	}
+	if handle[0] == '-' || handle[len(handle)-1] == '-' {
+		return false
+	}
+	for _, r := range handle {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func runPersonIdentitiesList(args []string) int {
@@ -368,7 +470,7 @@ func printPersonIdentitiesUsage() {
 	fmt.Fprintln(os.Stderr, "  scoop person-identities list [--include-archived] [--q <query>] [--limit 50] [--format table|json]")
 	fmt.Fprintln(os.Stderr, "  scoop person-identities show <identity_ref-or-person_identity_uuid> [--format table|json]")
 	fmt.Fprintln(os.Stderr, "  scoop person-identities refresh-avatar <identity_ref-or-person_identity_uuid> [--format table|json]")
-	fmt.Fprintln(os.Stderr, "  scoop person-identities refresh-avatars [--provider discord] [--format table|json]")
+	fmt.Fprintln(os.Stderr, "  scoop person-identities refresh-avatars [--provider discord|github] [--format table|json]")
 	fmt.Fprintln(os.Stderr, "  scoop person-identities archive <identity_ref-or-person_identity_uuid> [--format table|json]")
 	fmt.Fprintln(os.Stderr, "  scoop person-identities unarchive <identity_ref-or-person_identity_uuid> [--format table|json]")
 }

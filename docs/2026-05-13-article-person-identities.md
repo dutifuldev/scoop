@@ -151,7 +151,7 @@ Identity management commands can live under `person-identities`:
 scoop person-identities list [--include-archived] [--format table|json]
 scoop person-identities show <identity_ref-or-person_identity_uuid> [--format table|json]
 scoop person-identities refresh-avatar <identity_ref-or-person_identity_uuid> [--format table|json]
-scoop person-identities refresh-avatars [--provider discord] [--format table|json]
+scoop person-identities refresh-avatars [--provider discord|github] [--format table|json]
 scoop person-identities archive <identity_ref-or-person_identity_uuid>
 scoop person-identities unarchive <identity_ref-or-person_identity_uuid>
 ```
@@ -175,6 +175,22 @@ https://cdn.discordapp.com/avatars/{discord_user_id}/{avatar_hash}.webp?size=128
 ```
 
 If Discord returns no custom avatar, keep `avatar_url` empty and let the UI use initials.
+
+For GitHub identities, the refresh command should:
+
+1. Require `provider = github`.
+2. Require `handle`.
+3. Fetch the public GitHub user object.
+4. Read `avatar_url`.
+5. Store that URL in `avatar_url`.
+
+The request should use the official GitHub user endpoint:
+
+```text
+GET https://api.github.com/users/{handle}
+```
+
+If `GITHUB_TOKEN` is present in the environment, send it as a bearer token. The token is optional because public GitHub profiles can be resolved without authentication. If GitHub returns no avatar URL, keep `avatar_url` empty and let the UI use initials.
 
 ## Identity Upsert
 

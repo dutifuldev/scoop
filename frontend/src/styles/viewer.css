@@ -641,6 +641,10 @@
     height: var(--article-byline-icon-size);
   }
 
+  .article-byline-provider-icon.github-provider-icon {
+    @apply opacity-100;
+  }
+
   .member-tag-tools {
     @apply mt-2;
   }

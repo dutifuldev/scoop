@@ -388,6 +388,16 @@
     @apply text-panel-400;
   }
 
+  .title-source-link-github-numbered {
+    @apply gap-1 px-2;
+    width: auto;
+    min-width: var(--title-action-size);
+  }
+
+  .title-source-link-number {
+    @apply font-mono text-[0.75rem] font-semibold leading-none text-panel-100;
+  }
+
   .title-action-button {
     @apply border-panel-500 bg-panel-700/60;
   }

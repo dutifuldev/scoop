@@ -676,6 +676,74 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByRole("button", { name: "Add article tag" })).toHaveClass("title-action");
   });
 
+  it("renders GitHub issue title source links with logo and issue number", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeSingleArticleDetail();
+    detail.story.canonical_url = "https://github.com/openai/codex/issues/1234";
+    detail.members[0].canonical_url = "https://github.com/openai/codex/issues/1234";
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[]}
+          activeLang=""
+          isLoading={false}
+          error=""
+        />
+      </QueryClientProvider>,
+    );
+
+    const githubSourceLink = await screen.findByRole("link", {
+      name: "GitHub issue #1234 in openai/codex",
+    });
+    expect(githubSourceLink).toHaveClass("title-action");
+    expect(githubSourceLink).toHaveClass("title-source-link-github-numbered");
+    expect(githubSourceLink).toHaveAttribute("href", "https://github.com/openai/codex/issues/1234");
+    expect(githubSourceLink).toHaveTextContent("#1234");
+    expect(container.querySelector(".title-source-link-github-icon")).not.toBeNull();
+  });
+
+  it("renders generic GitHub title source links as logo-only actions", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+    const detail = makeSingleArticleDetail();
+    detail.story.canonical_url = "https://github.com/openai/codex";
+    detail.members[0].canonical_url = "https://github.com/openai/codex";
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <StoryDetailPanel
+          selectedStoryUUID="story-uuid-single"
+          selectedItemUUID=""
+          detail={detail}
+          availableTags={[]}
+          activeLang=""
+          isLoading={false}
+          error=""
+        />
+      </QueryClientProvider>,
+    );
+
+    const githubSourceLink = await screen.findByRole("link", {
+      name: "GitHub link to openai/codex",
+    });
+    expect(githubSourceLink).toHaveClass("title-action");
+    expect(githubSourceLink).toHaveClass("title-source-link-github");
+    expect(githubSourceLink).not.toHaveClass("title-source-link-github-numbered");
+    expect(githubSourceLink).not.toHaveTextContent("#");
+    expect(container.querySelector(".title-source-link-github-icon")).not.toBeNull();
+  });
+
   it("renders same-url members as separate visible items", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {

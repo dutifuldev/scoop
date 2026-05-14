@@ -2,9 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Copy, ExternalLink } from "lucide-react";
 
 import discordLogoURL from "../../assets/discord.svg";
-
-export const discordMessagePattern =
-  /^https?:\/\/discord\.com\/channels\/([^/]+)\/([^/]+)\/([^/?#]+)/i;
+import { discordMessagePattern, labelForURL } from "../../lib/sourceLinks";
 
 const inlineLinkPattern =
   /\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]}>,]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)\]}>,]*)?)/gi;
@@ -134,20 +132,6 @@ export function DiscordMessageLink({
       </span>
     </span>
   );
-}
-
-export function labelForURL(url: string): string {
-  const discordMatch = url.match(discordMessagePattern);
-  if (discordMatch) {
-    return "Discord message";
-  }
-
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
 }
 
 function renderInlineLinks(text: string): ReactNode[] {

@@ -56,6 +56,16 @@ function providerIcon(identity: PersonIdentity): JSX.Element | null {
   );
 }
 
+function githubProfileURL(identity: PersonIdentity | null, handle: string): string {
+  if (identity?.provider.toLowerCase() !== "github" || !handle) {
+    return "";
+  }
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(handle)) {
+    return "";
+  }
+  return `https://github.com/${handle}`;
+}
+
 export function ArticleByline({
   identities = [],
   publishedAt,
@@ -69,6 +79,7 @@ export function ArticleByline({
   const handle = rawHandle ? cleanIdentityHandle(rawHandle) : "";
   const fallbackLabel = identity ? personIdentityLabel(identity) : source.trim();
   const visibleIdentity = handle ? `@${handle}` : fallbackLabel;
+  const identityURL = githubProfileURL(identity, handle);
   const avatarLabel = displayName || handle || fallbackLabel || source || "article";
   const avatarURL = identity?.avatar_url?.trim() || "";
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
@@ -97,7 +108,16 @@ export function ArticleByline({
       <div className="article-byline-main">
         <div className="article-byline-identity">
           {displayName ? <span className="article-byline-name">{displayName}</span> : null}
-          {visibleIdentity ? (
+          {identityURL ? (
+            <a
+              className="article-byline-handle article-byline-handle-link"
+              href={identityURL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {visibleIdentity}
+            </a>
+          ) : visibleIdentity ? (
             <span className="article-byline-handle">{visibleIdentity}</span>
           ) : null}
           {identity ? providerIcon(identity) : null}

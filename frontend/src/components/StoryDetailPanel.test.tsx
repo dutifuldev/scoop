@@ -393,6 +393,11 @@ describe("StoryDetailPanel", () => {
 
     const byline = (await screen.findByText("@joshavant")).closest(".article-byline");
     expect(byline).not.toBeNull();
+    expect(screen.getByRole("link", { name: "@joshavant" })).toHaveAttribute(
+      "href",
+      "https://github.com/joshavant",
+    );
+    expect(screen.getByRole("link", { name: "@joshavant" })).toHaveAttribute("target", "_blank");
     const providerIcon = container.querySelector(".article-byline-provider-icon");
     expect(providerIcon).not.toBeNull();
     expect(providerIcon).toHaveClass("github-provider-icon");

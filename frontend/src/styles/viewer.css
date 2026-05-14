@@ -612,6 +612,10 @@
     @apply shrink-0 font-semibold text-panel-100;
   }
 
+  .article-byline-handle-link {
+    @apply no-underline transition hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35;
+  }
+
   .article-byline-dot,
   .article-byline-date {
     @apply shrink-0 text-panel-400;

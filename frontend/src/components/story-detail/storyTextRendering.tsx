@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Copy, ExternalLink } from "lucide-react";
 
-import discordLogoURL from "../../assets/discord.svg";
 import { discordMessagePattern, labelForURL } from "../../lib/sourceLinks";
+import { ProviderIcon } from "./ProviderIcon";
 
 const inlineLinkPattern =
   /\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s)\]}>,]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s)\]}>,]*)?)/gi;
@@ -30,7 +30,7 @@ function normalizeURLTarget(rawURL: string): { url: string; trailing: string } |
 }
 
 export function DiscordLinkIcon(): JSX.Element {
-  return <img className="discord-link-icon" src={discordLogoURL} alt="" aria-hidden="true" />;
+  return <ProviderIcon provider="discord" className="discord-link-icon" />;
 }
 
 function discordAppURL(url: string): string {

@@ -400,7 +400,7 @@ describe("StoryDetailPanel", () => {
     expect(screen.getByRole("link", { name: "@joshavant" })).toHaveAttribute("target", "_blank");
     const providerIcon = container.querySelector(".article-byline-provider-icon");
     expect(providerIcon).not.toBeNull();
-    expect(providerIcon).toHaveClass("github-provider-icon");
+    expect(providerIcon).toHaveClass("provider-icon-github");
     expect(providerIcon).toHaveAttribute("src", expect.stringContaining("github.svg"));
     expect(screen.queryByText("github")).not.toBeInTheDocument();
   });

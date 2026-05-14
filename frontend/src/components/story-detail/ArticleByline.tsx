@@ -1,7 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import discordLogoURL from "../../assets/discord.svg";
-import githubLogoURL from "../../assets/github.svg";
 import {
   cleanIdentityHandle,
   personIdentityLabel,
@@ -10,6 +8,7 @@ import {
 import { getViewerTimeZone } from "../../lib/viewerTimeZone";
 import { formatBylineDate } from "../../lib/viewerFormat";
 import type { PersonIdentity } from "../../types";
+import { ProviderIcon } from "./ProviderIcon";
 
 interface ArticleBylineProps {
   identities?: PersonIdentity[];
@@ -33,27 +32,6 @@ function initialsFor(label: string): string {
     return words[0].slice(0, 2).toUpperCase();
   }
   return "?";
-}
-
-function providerIcon(identity: PersonIdentity): JSX.Element | null {
-  const provider = identity.provider.toLowerCase();
-  const iconURLByProvider: Record<string, string> = {
-    discord: discordLogoURL,
-    github: githubLogoURL,
-  };
-  const iconURL = iconURLByProvider[provider];
-  if (!iconURL) {
-    return null;
-  }
-
-  return (
-    <img
-      className={`discord-link-icon article-byline-provider-icon ${provider}-provider-icon`}
-      src={iconURL}
-      alt=""
-      aria-hidden="true"
-    />
-  );
 }
 
 function githubProfileURL(identity: PersonIdentity | null, handle: string): string {
@@ -120,7 +98,12 @@ export function ArticleByline({
           ) : visibleIdentity ? (
             <span className="article-byline-handle">{visibleIdentity}</span>
           ) : null}
-          {identity ? providerIcon(identity) : null}
+          {identity ? (
+            <ProviderIcon
+              provider={identity.provider}
+              className="discord-link-icon article-byline-provider-icon"
+            />
+          ) : null}
           {bylineDate ? (
             <>
               <span className="article-byline-dot" aria-hidden="true">

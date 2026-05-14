@@ -1,8 +1,8 @@
 import type { CSSProperties, MouseEventHandler, ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
-import githubLogoURL from "../../assets/github.svg";
 import { classifySourceLink } from "../../lib/sourceLinks";
+import { ProviderIcon } from "./ProviderIcon";
 import { DiscordMessageLink } from "./storyTextRendering";
 
 interface TitleActionsProps {
@@ -166,11 +166,9 @@ export function TitleSourceLink({ url }: TitleSourceLinkProps): JSX.Element | nu
           numberedLink ? "title-source-link-github-numbered" : ""
         }`.trim()}
       >
-        <img
+        <ProviderIcon
+          provider="github"
           className="title-action-icon title-source-link-icon title-source-link-github-icon"
-          src={githubLogoURL}
-          alt=""
-          aria-hidden="true"
         />
         {numberedLink ? (
           <span className="title-source-link-number">#{sourceLink.number}</span>

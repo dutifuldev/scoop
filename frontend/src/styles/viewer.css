@@ -641,7 +641,7 @@
     height: var(--article-byline-icon-size);
   }
 
-  .article-byline-provider-icon.github-provider-icon {
+  .article-byline-provider-icon.provider-icon-github {
     @apply opacity-100;
   }
 

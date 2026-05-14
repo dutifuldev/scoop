@@ -399,7 +399,7 @@
   }
 
   .title-source-link-number {
-    @apply font-mono text-[0.75rem] font-semibold leading-none text-panel-400;
+    @apply font-mono text-[0.75rem] font-semibold leading-none text-panel-100;
   }
 
   .title-action-button {

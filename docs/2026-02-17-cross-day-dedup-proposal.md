@@ -1,3 +1,9 @@
+---
+title: Cross-Day Thematic Dedup Proposal
+author: Scoop Maintainers
+date: 2026-02-17
+---
+
 # Cross-Day Thematic Dedup Proposal
 
 ## Summary

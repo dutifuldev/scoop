@@ -15,6 +15,7 @@ import (
 
 	"horse.fit/scoop/internal/auth"
 	"horse.fit/scoop/internal/db"
+	"horse.fit/scoop/internal/globaltime"
 )
 
 type upsertSettingsCall struct {
@@ -30,19 +31,28 @@ type setPasswordCall struct {
 }
 
 type fakeAuthStore struct {
-	sessions           map[string]*db.AuthSession
-	usersByUsername    map[string]*db.AuthUser
-	usersByID          map[int64]*db.AuthUser
-	settingsByUserID   map[int64]*db.UserSettingsRecord
-	createSessionID    string
-	createSessionCalls int
-	deleteSessionCalls []string
-	getSessionCalls    int
-	touchSessionCalls  int
-	setLastLoginCalls  int
-	deleteExpiredCalls int
-	upsertCalls        []upsertSettingsCall
-	setPasswordCalls   []setPasswordCall
+	sessions             map[string]*db.AuthSession
+	usersByUsername      map[string]*db.AuthUser
+	usersByID            map[int64]*db.AuthUser
+	settingsByUserID     map[int64]*db.UserSettingsRecord
+	createSessionID      string
+	getSessionErr        error
+	getUserByUsernameErr error
+	getUserByIDErr       error
+	ensureSettingsErr    error
+	createSessionErr     error
+	setLastLoginErr      error
+	deleteExpiredErr     error
+	upsertSettingsErr    error
+	setPasswordErr       error
+	createSessionCalls   int
+	deleteSessionCalls   []string
+	getSessionCalls      int
+	touchSessionCalls    int
+	setLastLoginCalls    int
+	deleteExpiredCalls   int
+	upsertCalls          []upsertSettingsCall
+	setPasswordCalls     []setPasswordCall
 }
 
 func newFakeAuthStore() *fakeAuthStore {
@@ -56,6 +66,9 @@ func newFakeAuthStore() *fakeAuthStore {
 
 func (s *fakeAuthStore) GetSession(_ context.Context, sessionID string) (*db.AuthSession, error) {
 	s.getSessionCalls++
+	if s.getSessionErr != nil {
+		return nil, s.getSessionErr
+	}
 	row, exists := s.sessions[sessionID]
 	if !exists {
 		return nil, db.ErrNoRows
@@ -81,6 +94,9 @@ func (s *fakeAuthStore) TouchSession(_ context.Context, sessionID string, seenAt
 }
 
 func (s *fakeAuthStore) GetUserByUsername(_ context.Context, username string) (*db.AuthUser, error) {
+	if s.getUserByUsernameErr != nil {
+		return nil, s.getUserByUsernameErr
+	}
 	row, exists := s.usersByUsername[strings.TrimSpace(strings.ToLower(username))]
 	if !exists {
 		return nil, db.ErrNoRows
@@ -90,6 +106,9 @@ func (s *fakeAuthStore) GetUserByUsername(_ context.Context, username string) (*
 }
 
 func (s *fakeAuthStore) GetUserByID(_ context.Context, userID int64) (*db.AuthUser, error) {
+	if s.getUserByIDErr != nil {
+		return nil, s.getUserByIDErr
+	}
 	row, exists := s.usersByID[userID]
 	if !exists {
 		return nil, db.ErrNoRows
@@ -100,6 +119,9 @@ func (s *fakeAuthStore) GetUserByID(_ context.Context, userID int64) (*db.AuthUs
 
 func (s *fakeAuthStore) CreateSession(_ context.Context, userID int64, expiresAt, now time.Time) (string, error) {
 	s.createSessionCalls++
+	if s.createSessionErr != nil {
+		return "", s.createSessionErr
+	}
 	sessionID := s.createSessionID
 	if sessionID == "" {
 		sessionID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -115,6 +137,9 @@ func (s *fakeAuthStore) CreateSession(_ context.Context, userID int64, expiresAt
 
 func (s *fakeAuthStore) SetUserLastLogin(_ context.Context, userID int64, loginAt time.Time) error {
 	s.setLastLoginCalls++
+	if s.setLastLoginErr != nil {
+		return s.setLastLoginErr
+	}
 	row, exists := s.usersByID[userID]
 	if !exists {
 		return db.ErrNoRows
@@ -126,6 +151,9 @@ func (s *fakeAuthStore) SetUserLastLogin(_ context.Context, userID int64, loginA
 
 func (s *fakeAuthStore) DeleteExpiredSessions(_ context.Context, now time.Time) (int64, error) {
 	s.deleteExpiredCalls++
+	if s.deleteExpiredErr != nil {
+		return 0, s.deleteExpiredErr
+	}
 	var deleted int64
 	for sessionID, row := range s.sessions {
 		if !row.ExpiresAt.After(now) {
@@ -137,6 +165,9 @@ func (s *fakeAuthStore) DeleteExpiredSessions(_ context.Context, now time.Time) 
 }
 
 func (s *fakeAuthStore) EnsureUserSettings(_ context.Context, userID int64) (*db.UserSettingsRecord, error) {
+	if s.ensureSettingsErr != nil {
+		return nil, s.ensureSettingsErr
+	}
 	row, exists := s.settingsByUserID[userID]
 	if !exists {
 		row = &db.UserSettingsRecord{
@@ -164,6 +195,9 @@ func (s *fakeAuthStore) UpsertUserSettings(
 		preferredLanguage: preferredLanguage,
 		uiPrefs:           copiedUIPrefs,
 	})
+	if s.upsertSettingsErr != nil {
+		return nil, s.upsertSettingsErr
+	}
 
 	row := &db.UserSettingsRecord{
 		UserID:            userID,
@@ -188,6 +222,9 @@ func (s *fakeAuthStore) SetUserPasswordHash(
 		passwordHash:       passwordHash,
 		mustChangePassword: mustChangePassword,
 	})
+	if s.setPasswordErr != nil {
+		return s.setPasswordErr
+	}
 
 	row, exists := s.usersByID[userID]
 	if !exists {
@@ -241,6 +278,136 @@ func TestRequireAuth_InvalidSessionCookieReturnsUnauthorizedAndClearsCookie(t *t
 	}
 	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "scoop_session=") {
 		t.Fatalf("expected cleared session cookie, got %q", cookie)
+	}
+}
+
+func TestRequireAuth_AllowsValidSessionAndTouchesStaleSession(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	globaltime.SetMockTime(now)
+	t.Cleanup(globaltime.ResetTime)
+
+	store := newFakeAuthStore()
+	store.sessions["33333333-3333-3333-3333-333333333333"] = &db.AuthSession{
+		SessionID:  "33333333-3333-3333-3333-333333333333",
+		UserID:     7,
+		Username:   "admin",
+		ExpiresAt:  now.Add(time.Hour),
+		LastSeenAt: now.Add(-2 * time.Minute),
+	}
+	server := &Server{
+		logger:    zerolog.Nop(),
+		opts:      Options{SessionCookie: "scoop_session"},
+		authStore: store,
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "scoop_session", Value: "33333333-3333-3333-3333-333333333333"})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := server.requireAuth()(func(c echo.Context) error {
+		principal, ok := principalFromContext(c)
+		if !ok {
+			t.Fatalf("principal missing from context")
+		}
+		if principal.UserID != 7 || principal.Username != "admin" {
+			t.Fatalf("unexpected principal: %#v", principal)
+		}
+		return c.NoContent(http.StatusOK)
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("requireAuth returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+	if store.touchSessionCalls != 1 {
+		t.Fatalf("touchSessionCalls = %d, want 1", store.touchSessionCalls)
+	}
+}
+
+func TestRequireAuth_DeletesExpiredSession(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	globaltime.SetMockTime(now)
+	t.Cleanup(globaltime.ResetTime)
+
+	store := newFakeAuthStore()
+	store.sessions["44444444-4444-4444-4444-444444444444"] = &db.AuthSession{
+		SessionID:  "44444444-4444-4444-4444-444444444444",
+		UserID:     7,
+		Username:   "admin",
+		ExpiresAt:  now.Add(-time.Second),
+		LastSeenAt: now.Add(-time.Minute),
+	}
+	server := &Server{
+		logger:    zerolog.Nop(),
+		opts:      Options{SessionCookie: "scoop_session"},
+		authStore: store,
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "scoop_session", Value: "44444444-4444-4444-4444-444444444444"})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := server.requireAuth()(func(c echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("requireAuth returned error: %v", err)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if len(store.deleteSessionCalls) != 1 || store.deleteSessionCalls[0] != "44444444-4444-4444-4444-444444444444" {
+		t.Fatalf("deleteSessionCalls = %#v, want expired session deletion", store.deleteSessionCalls)
+	}
+}
+
+func TestRequireAuth_ReturnsInternalErrorWithoutStore(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{
+		logger: zerolog.Nop(),
+		opts:   Options{SessionCookie: "scoop_session"},
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: "scoop_session", Value: "55555555-5555-5555-5555-555555555555"})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	handler := server.requireAuth()(func(c echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("requireAuth returned error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestSessionCookieHelpers(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{opts: Options{SessionCookie: "scoop_session", SessionSecure: true}}
+	if got := (*Server)(nil).sessionExpiry(time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)); !got.Equal(time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("nil server sessionExpiry() = %s", got)
+	}
+	if sessionID, ok := server.sessionIDFromCookie(nil); ok || sessionID != "" {
+		t.Fatalf("sessionIDFromCookie(nil) = %q, %t; want empty false", sessionID, ok)
+	}
+	server.setSessionCookie(nil, "session", time.Now())
+	server.clearSessionCookie(nil)
+
+	_, c, rec := newJSONContext(http.MethodGet, "/api/v1/me", "")
+	expiresAt := time.Now().Add(-time.Hour)
+	server.setSessionCookie(c, " 88888888-8888-8888-8888-888888888888 ", expiresAt)
+	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "scoop_session=88888888-8888-8888-8888-888888888888") || !strings.Contains(cookie, "Max-Age=1") {
+		t.Fatalf("session cookie = %q", cookie)
 	}
 }
 
@@ -343,6 +510,53 @@ func TestHandleLogin_RejectsInvalidPasswordWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestHandleLoginValidationAndStoreFailures(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		body       string
+		store      *fakeAuthStore
+		wantStatus int
+	}{
+		{name: "bad json", body: `{"username":`, store: newFakeAuthStore(), wantStatus: http.StatusBadRequest},
+		{name: "missing username", body: `{"username":" ","password":"x"}`, store: newFakeAuthStore(), wantStatus: http.StatusBadRequest},
+		{name: "missing user", body: `{"username":"admin","password":"x"}`, store: newFakeAuthStore(), wantStatus: http.StatusUnauthorized},
+		{
+			name:       "user lookup error",
+			body:       `{"username":"admin","password":"x"}`,
+			store:      authStoreWithUser(t, 7, "admin", `{"password_enabled":false}`),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "settings error",
+			body:       `{"username":"admin","password":"x"}`,
+			store:      authStoreWithSettingsError(t),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "create session error",
+			body:       `{"username":"admin","password":"x"}`,
+			store:      authStoreWithSessionCreateError(t),
+			wantStatus: http.StatusInternalServerError,
+		},
+	}
+
+	cases[3].store.getUserByUsernameErr = assertErr("lookup failed")
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &Server{logger: zerolog.Nop(), opts: Options{SessionCookie: "scoop_session"}, authStore: tt.store}
+			_, c, rec := newJSONContext(http.MethodPost, "/api/v1/auth/login", tt.body)
+			if err := server.handleLogin(c); err != nil {
+				t.Fatalf("handleLogin returned error: %v", err)
+			}
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestHandleLogout_DeletesSessionAndClearsCookie(t *testing.T) {
 	t.Parallel()
 
@@ -379,6 +593,22 @@ func TestHandleLogout_DeletesSessionAndClearsCookie(t *testing.T) {
 	}
 	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "scoop_session=") {
 		t.Fatalf("expected cleared session cookie, got %q", cookie)
+	}
+}
+
+func TestHandleLogoutWithoutSessionOrStoreStillClearsCookie(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{logger: zerolog.Nop(), opts: Options{SessionCookie: "scoop_session"}}
+	_, c, rec := newJSONContext(http.MethodPost, "/api/v1/auth/logout", "")
+	if err := server.handleLogout(c); err != nil {
+		t.Fatalf("handleLogout returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want OK", rec.Code, rec.Body.String())
+	}
+	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "scoop_session=") {
+		t.Fatalf("expected cleared cookie, got %q", cookie)
 	}
 }
 
@@ -443,6 +673,66 @@ func TestHandlePutMySettings_UpdatesPasswordAndPasswordEnabled(t *testing.T) {
 	}
 }
 
+func TestHandleGetMySettingsReturnsPrincipalSettings(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeAuthStore()
+	store.settingsByUserID[9] = &db.UserSettingsRecord{
+		UserID:            9,
+		PreferredLanguage: "zh",
+		UIPrefs:           json.RawMessage(`{"password_enabled":true}`),
+	}
+	server := &Server{
+		logger:    zerolog.Nop(),
+		authStore: store,
+	}
+
+	_, c, rec := newJSONContext(http.MethodGet, "/api/v1/me/settings", "")
+	c.Set("auth.principal", authPrincipal{UserID: 9, Username: "admin"})
+
+	if err := server.handleGetMySettings(c); err != nil {
+		t.Fatalf("handleGetMySettings returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `"preferred_language":"zh"`) {
+		t.Fatalf("response missing preferred language: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"password_enabled":true`) {
+		t.Fatalf("response missing password flag: %s", rec.Body.String())
+	}
+}
+
+func TestIsPasswordEnabledMapSupportsPersistedUIPrefShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		prefs map[string]any
+		want  bool
+	}{
+		{name: "missing", prefs: map[string]any{}, want: false},
+		{name: "bool true", prefs: map[string]any{passwordEnabledUIPrefKey: true}, want: true},
+		{name: "bool false", prefs: map[string]any{passwordEnabledUIPrefKey: false}, want: false},
+		{name: "string true", prefs: map[string]any{passwordEnabledUIPrefKey: " yes "}, want: true},
+		{name: "string false", prefs: map[string]any{passwordEnabledUIPrefKey: "no"}, want: false},
+		{name: "json number one", prefs: map[string]any{passwordEnabledUIPrefKey: float64(1)}, want: true},
+		{name: "json number zero", prefs: map[string]any{passwordEnabledUIPrefKey: float64(0)}, want: false},
+		{name: "unsupported type", prefs: map[string]any{passwordEnabledUIPrefKey: []string{"true"}}, want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isPasswordEnabledMap(tt.prefs); got != tt.want {
+				t.Fatalf("isPasswordEnabledMap() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandlePutMySettings_RequiresPasswordWhenEnablingPasswordAuth(t *testing.T) {
 	t.Parallel()
 
@@ -485,4 +775,79 @@ func TestHandlePutMySettings_RequiresPasswordWhenEnablingPasswordAuth(t *testing
 	if len(store.setPasswordCalls) != 0 {
 		t.Fatalf("did not expect password update calls, got %d", len(store.setPasswordCalls))
 	}
+}
+
+func TestHandleMeFailurePaths(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		server     *Server
+		principal  *authPrincipal
+		wantStatus int
+	}{
+		{name: "missing store", server: &Server{logger: zerolog.Nop()}, principal: &authPrincipal{UserID: 7}, wantStatus: http.StatusInternalServerError},
+		{name: "missing principal", server: &Server{logger: zerolog.Nop(), authStore: newFakeAuthStore()}, wantStatus: http.StatusUnauthorized},
+		{name: "missing user", server: &Server{logger: zerolog.Nop(), authStore: newFakeAuthStore()}, principal: &authPrincipal{UserID: 7}, wantStatus: http.StatusUnauthorized},
+		{name: "user lookup error", server: &Server{logger: zerolog.Nop(), authStore: &fakeAuthStore{
+			sessions:         map[string]*db.AuthSession{},
+			usersByUsername:  map[string]*db.AuthUser{},
+			usersByID:        map[int64]*db.AuthUser{},
+			settingsByUserID: map[int64]*db.UserSettingsRecord{},
+			getUserByIDErr:   assertErr("lookup failed"),
+		}}, principal: &authPrincipal{UserID: 7}, wantStatus: http.StatusInternalServerError},
+		{name: "settings error", server: &Server{logger: zerolog.Nop(), authStore: authStoreWithSettingsError(t)}, principal: &authPrincipal{UserID: 7}, wantStatus: http.StatusInternalServerError},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, c, rec := newJSONContext(http.MethodGet, "/api/v1/me", "")
+			if tt.principal != nil {
+				c.Set("auth.principal", *tt.principal)
+			}
+			if err := tt.server.handleMe(c); err != nil {
+				t.Fatalf("handleMe returned error: %v", err)
+			}
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), tt.wantStatus)
+			}
+		})
+	}
+}
+
+func authStoreWithUser(t *testing.T, userID int64, username string, prefs string) *fakeAuthStore {
+	t.Helper()
+	passwordHash, err := auth.HashPassword("secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	store := newFakeAuthStore()
+	user := &db.AuthUser{
+		UserID:       userID,
+		Username:     username,
+		PasswordHash: passwordHash,
+		CreatedAt:    time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC),
+	}
+	store.usersByUsername[username] = user
+	store.usersByID[userID] = user
+	store.settingsByUserID[userID] = &db.UserSettingsRecord{
+		UserID:            userID,
+		PreferredLanguage: "en",
+		UIPrefs:           json.RawMessage(prefs),
+	}
+	return store
+}
+
+func authStoreWithSettingsError(t *testing.T) *fakeAuthStore {
+	t.Helper()
+	store := authStoreWithUser(t, 7, "admin", `{}`)
+	store.ensureSettingsErr = assertErr("settings failed")
+	return store
+}
+
+func authStoreWithSessionCreateError(t *testing.T) *fakeAuthStore {
+	t.Helper()
+	store := authStoreWithUser(t, 7, "admin", `{}`)
+	store.createSessionErr = assertErr("session failed")
+	return store
 }

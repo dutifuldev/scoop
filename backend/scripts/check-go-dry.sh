@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-maximum_candidates="${GO_DRY_MAX_CANDIDATES:-55}"
+maximum_candidates="${GO_DRY_MAX_CANDIDATES:-0}"
 report_file="$(mktemp)"
 trap 'rm -f "$report_file"' EXIT
 
@@ -17,7 +17,8 @@ import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     payload = json.load(handle)
-print(len(payload.get("candidates", [])))
+candidates = payload.get("candidates") or []
+print(len(candidates))
 PY
 )"
 

@@ -158,6 +158,77 @@ func TestValidateNewsItemPayload_MetadataInnerKeysRequired(t *testing.T) {
 	}
 }
 
+func TestValidateNewsItemPayload_StrictJSONAndURIErrors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		payload json.RawMessage
+		want    string
+	}{
+		{name: "empty", payload: json.RawMessage(`  `), want: "payload is empty"},
+		{name: "trailing", payload: json.RawMessage(`{} {}`), want: "trailing content"},
+		{
+			name: "blank source",
+			payload: json.RawMessage(`{
+				"payload_version":"v1",
+				"source":" ",
+				"source_item_id":"id-blank-source",
+				"title":"Blank source",
+				"source_metadata":{
+					"collection":"ai_news",
+					"job_name":"openclaw-ai-daily",
+					"job_run_id":"run_2026_02_14_006",
+					"scraped_at":"2026-02-14T10:00:00Z"
+				}
+			}`),
+			want: "source must not be empty",
+		},
+		{
+			name: "wrong payload version",
+			payload: json.RawMessage(`{
+				"payload_version":"v2",
+				"source":"rss",
+				"source_item_id":"id-version",
+				"title":"Bad version",
+				"source_metadata":{
+					"collection":"ai_news",
+					"job_name":"openclaw-ai-daily",
+					"job_run_id":"run_2026_02_14_007",
+					"scraped_at":"2026-02-14T10:00:00Z"
+				}
+			}`),
+			want: "schema validation failed",
+		},
+		{
+			name: "blank canonical URL",
+			payload: json.RawMessage(`{
+				"payload_version":"v1",
+				"source":"rss",
+				"source_item_id":"id-url",
+				"title":"Blank URL",
+				"canonical_url":" ",
+				"source_metadata":{
+					"collection":"ai_news",
+					"job_name":"openclaw-ai-daily",
+					"job_run_id":"run_2026_02_14_008",
+					"scraped_at":"2026-02-14T10:00:00Z"
+				}
+			}`),
+			want: "schema validation failed",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateNewsItemPayload(tt.payload)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateNewsItemPayload() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateSemantics(t *testing.T) {
 	valid := NewsItem{
 		PayloadVersion: "v1",

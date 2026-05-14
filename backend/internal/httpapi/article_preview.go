@@ -130,27 +130,47 @@ func buildArticlePreviewText(
 	normalizedText string,
 	sourceName string,
 ) (string, string, error) {
-	if strings.EqualFold(strings.TrimSpace(sourceName), "discord_archive") && normalizedText != "" {
+	if useNormalizedPreviewForSource(sourceName, normalizedText) {
 		return normalizedText, "normalized_text", nil
 	}
 
 	url := strings.TrimSpace(derefString(canonicalURL))
-	if url != "" {
-		readerText, err := fetchReaderPreviewText(ctx, url, normalizedTitle)
-		if err == nil && strings.TrimSpace(readerText) != "" {
-			return readerText, "reader", nil
-		}
-		if normalizedText != "" {
-			return normalizedText, "normalized_text", err
-		}
-		return "", "none", err
-	}
+	return previewTextFromURLOrFallback(ctx, url, normalizedTitle, normalizedText)
+}
 
+func useNormalizedPreviewForSource(sourceName string, normalizedText string) bool {
+	return strings.EqualFold(strings.TrimSpace(sourceName), "discord_archive") && normalizedText != ""
+}
+
+func previewTextFromURLOrFallback(
+	ctx context.Context,
+	url string,
+	normalizedTitle string,
+	normalizedText string,
+) (string, string, error) {
+	if url != "" {
+		return previewTextFromReader(ctx, url, normalizedTitle, normalizedText)
+	}
 	if normalizedText != "" {
 		return normalizedText, "normalized_text", nil
 	}
-
 	return "", "none", nil
+}
+
+func previewTextFromReader(
+	ctx context.Context,
+	url string,
+	normalizedTitle string,
+	normalizedText string,
+) (string, string, error) {
+	readerText, err := fetchReaderPreviewText(ctx, url, normalizedTitle)
+	if err == nil && strings.TrimSpace(readerText) != "" {
+		return readerText, "reader", nil
+	}
+	if normalizedText != "" {
+		return normalizedText, "normalized_text", err
+	}
+	return "", "none", err
 }
 
 func fetchReaderPreviewText(ctx context.Context, canonicalURL string, title string) (string, error) {
@@ -166,8 +186,8 @@ func truncatePreviewText(raw string, maxChars int) (string, bool) {
 }
 
 func derefString(value *string) string {
-	if value == nil {
-		return ""
+	if value != nil {
+		return *value
 	}
-	return *value
+	return ""
 }

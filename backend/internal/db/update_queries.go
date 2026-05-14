@@ -5,12 +5,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"time"
-	"unicode"
 
 	textnormalize "horse.fit/scoop/internal/normalize"
+	"horse.fit/scoop/internal/textmetrics"
 )
 
 type UpdateStoryOptions struct {
@@ -27,94 +26,62 @@ type UpdateArticleOptions struct {
 	URL        *string
 }
 
+type storyUpdateFields struct {
+	title      *string
+	status     *string
+	collection *string
+	urlValue   *string
+	urlHash    []byte
+}
+
+type articleStaticUpdateFields struct {
+	source           *string
+	collection       *string
+	canonicalURL     *string
+	canonicalURLHash []byte
+	sourceDomain     *string
+}
+
+type articleTitleUpdateFields struct {
+	normalizedTitle *string
+	titleHash       []byte
+	contentHash     []byte
+	titleSimhash    *int64
+	tokenCount      *int
+}
+
+type sqlUpdatePlan struct {
+	set  []string
+	args []any
+}
+
+type sqlAssignment struct {
+	column string
+	value  any
+}
+
 func (p *Pool) UpdateStory(ctx context.Context, storyUUID string, opts UpdateStoryOptions, now time.Time) error {
 	trimmedUUID := strings.TrimSpace(storyUUID)
 	if trimmedUUID == "" {
 		return fmt.Errorf("story UUID is required")
 	}
-	if opts.Title == nil && opts.Status == nil && opts.Collection == nil && opts.URL == nil {
-		return fmt.Errorf("at least one update field is required")
+	plan, err := buildStoryUpdatePlan(trimmedUUID, opts, now)
+	if err != nil {
+		return err
 	}
 
-	var (
-		title      *string
-		status     *string
-		collection *string
-		urlValue   *string
-		urlHash    []byte
-	)
+	q := fmt.Sprintf(`
+	UPDATE news.stories
+	SET
+		%s
+	WHERE story_uuid = $1::uuid
+	  AND deleted_at IS NULL
+	`, strings.Join(plan.set, ",\n\t"))
 
-	if opts.Title != nil {
-		trimmed := strings.TrimSpace(*opts.Title)
-		if trimmed == "" {
-			return fmt.Errorf("title must not be empty")
-		}
-		title = &trimmed
-	}
+	return p.executeSingleRowUpdate(ctx, q, plan.args, "update story")
+}
 
-	if opts.Status != nil {
-		trimmed := strings.TrimSpace(strings.ToLower(*opts.Status))
-		if trimmed == "" {
-			return fmt.Errorf("status must not be empty")
-		}
-		status = &trimmed
-	}
-
-	if opts.Collection != nil {
-		normalized := normalizeCollection(*opts.Collection)
-		if normalized == "" {
-			return fmt.Errorf("collection must not be empty")
-		}
-		collection = &normalized
-	}
-
-	if opts.URL != nil {
-		trimmed := strings.TrimSpace(*opts.URL)
-		if trimmed == "" {
-			return fmt.Errorf("url must not be empty")
-		}
-		canonical, _ := textnormalize.URL(trimmed)
-		if canonical == "" {
-			return fmt.Errorf("url must be a fully-qualified URL")
-		}
-		urlValue = &canonical
-		hash := sha256.Sum256([]byte(canonical))
-		urlHash = append([]byte(nil), hash[:]...)
-	}
-
-	set := make([]string, 0, 8)
-	args := make([]any, 0, 8)
-	args = append(args, trimmedUUID)
-	argPos := 2
-
-	if title != nil {
-		set = append(set, fmt.Sprintf("canonical_title = $%d", argPos))
-		args = append(args, *title)
-		argPos++
-	}
-	if status != nil {
-		set = append(set, fmt.Sprintf("status = $%d", argPos))
-		args = append(args, *status)
-		argPos++
-	}
-	if collection != nil {
-		set = append(set, fmt.Sprintf("collection = $%d", argPos))
-		args = append(args, *collection)
-		argPos++
-	}
-	if urlValue != nil {
-		set = append(set, fmt.Sprintf("canonical_url = $%d", argPos))
-		args = append(args, *urlValue)
-		argPos++
-
-		set = append(set, fmt.Sprintf("canonical_url_hash = $%d", argPos))
-		args = append(args, urlHash)
-		argPos++
-	}
-
-	set = append(set, fmt.Sprintf("updated_at = $%d", argPos))
-	args = append(args, now.UTC())
-
+func (p *Pool) executeSingleRowUpdate(ctx context.Context, query string, args []any, label string) error {
 	tx, err := p.BeginTx(ctx, TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -123,17 +90,9 @@ func (p *Pool) UpdateStory(ctx context.Context, storyUUID string, opts UpdateSto
 		_ = tx.Rollback(ctx)
 	}()
 
-	q := fmt.Sprintf(`
-UPDATE news.stories
-SET
-	%s
-WHERE story_uuid = $1::uuid
-  AND deleted_at IS NULL
-`, strings.Join(set, ",\n\t"))
-
-	tag, err := tx.Exec(ctx, q, args...)
+	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update story: %w", err)
+		return fmt.Errorf("%s: %w", label, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNoRows
@@ -153,56 +112,20 @@ func (p *Pool) UpdateArticle(ctx context.Context, articleUUID string, opts Updat
 	if opts.Title == nil && opts.Source == nil && opts.Collection == nil && opts.URL == nil {
 		return fmt.Errorf("at least one update field is required")
 	}
-
-	var (
-		normalizedTitle *string
-		titleHash       []byte
-		contentHash     []byte
-		titleSimhash    *int64
-		tokenCount      *int
-
-		source     *string
-		collection *string
-
-		canonicalURL     *string
-		canonicalURLHash []byte
-		sourceDomain     *string
-	)
-
-	if opts.Source != nil {
-		trimmed := strings.TrimSpace(*opts.Source)
-		if trimmed == "" {
-			return fmt.Errorf("source must not be empty")
-		}
-		source = &trimmed
+	staticFields, err := normalizeArticleStaticUpdateFields(opts)
+	if err != nil {
+		return err
 	}
+	return p.updateArticle(ctx, trimmedUUID, opts, staticFields, now)
+}
 
-	if opts.Collection != nil {
-		normalized := normalizeCollection(*opts.Collection)
-		if normalized == "" {
-			return fmt.Errorf("collection must not be empty")
-		}
-		collection = &normalized
-	}
-
-	if opts.URL != nil {
-		trimmed := strings.TrimSpace(*opts.URL)
-		if trimmed == "" {
-			return fmt.Errorf("url must not be empty")
-		}
-		normalized, host := textnormalize.URL(trimmed)
-		if normalized == "" {
-			return fmt.Errorf("url must be a fully-qualified URL")
-		}
-		canonicalURL = &normalized
-		hash := sha256.Sum256([]byte(normalized))
-		canonicalURLHash = append([]byte(nil), hash[:]...)
-		if strings.TrimSpace(host) != "" {
-			hostCopy := strings.TrimSpace(strings.ToLower(host))
-			sourceDomain = &hostCopy
-		}
-	}
-
+func (p *Pool) updateArticle(
+	ctx context.Context,
+	articleUUID string,
+	opts UpdateArticleOptions,
+	staticFields articleStaticUpdateFields,
+	now time.Time,
+) error {
 	tx, err := p.BeginTx(ctx, TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -211,117 +134,24 @@ func (p *Pool) UpdateArticle(ctx context.Context, articleUUID string, opts Updat
 		_ = tx.Rollback(ctx)
 	}()
 
-	var existingNormalizedText string
-	const lockQuery = `
-SELECT normalized_text
-FROM news.articles
-WHERE article_uuid = $1::uuid
-  AND deleted_at IS NULL
-FOR UPDATE
-`
-	if err := tx.QueryRow(ctx, lockQuery, trimmedUUID).Scan(&existingNormalizedText); err != nil {
-		if errors.Is(err, ErrNoRows) {
-			return ErrNoRows
-		}
-		return fmt.Errorf("lock article: %w", err)
+	existingNormalizedText, err := lockArticleTextTx(ctx, tx, articleUUID)
+	if err != nil {
+		return err
 	}
-
-	if opts.Title != nil {
-		raw := strings.TrimSpace(*opts.Title)
-		if raw == "" {
-			return fmt.Errorf("title must not be empty")
-		}
-		normalized := textnormalize.Text(raw)
-		if normalized == "" {
-			return fmt.Errorf("title must not be empty")
-		}
-		normalizedTitle = &normalized
-
-		th := sha256.Sum256([]byte(normalized))
-		titleHash = append([]byte(nil), th[:]...)
-
-		body := strings.TrimSpace(existingNormalizedText)
-		ch := sha256.Sum256([]byte(normalized + "\n" + body))
-		contentHash = append([]byte(nil), ch[:]...)
-
-		if value, ok := simhash64(normalized); ok {
-			v := int64(value)
-			titleSimhash = &v
-		} else {
-			titleSimhash = nil
-		}
-
-		count := countTokens(normalized + " " + body)
-		tokenCount = &count
+	plan, err := buildArticleUpdatePlan(articleUUID, opts, staticFields, existingNormalizedText, now)
+	if err != nil {
+		return err
 	}
-
-	set := make([]string, 0, 16)
-	args := make([]any, 0, 16)
-	args = append(args, trimmedUUID)
-	argPos := 2
-
-	if normalizedTitle != nil {
-		set = append(set, fmt.Sprintf("normalized_title = $%d", argPos))
-		args = append(args, *normalizedTitle)
-		argPos++
-
-		set = append(set, fmt.Sprintf("title_hash = $%d", argPos))
-		args = append(args, titleHash)
-		argPos++
-
-		set = append(set, fmt.Sprintf("content_hash = $%d", argPos))
-		args = append(args, contentHash)
-		argPos++
-
-		set = append(set, fmt.Sprintf("title_simhash = $%d", argPos))
-		args = append(args, titleSimhash)
-		argPos++
-
-		set = append(set, fmt.Sprintf("token_count = $%d", argPos))
-		args = append(args, *tokenCount)
-		argPos++
-	}
-
-	if source != nil {
-		set = append(set, fmt.Sprintf("source = $%d", argPos))
-		args = append(args, *source)
-		argPos++
-	}
-
-	if collection != nil {
-		set = append(set, fmt.Sprintf("collection = $%d", argPos))
-		args = append(args, *collection)
-		argPos++
-	}
-
-	if canonicalURL != nil {
-		set = append(set, fmt.Sprintf("canonical_url = $%d", argPos))
-		args = append(args, *canonicalURL)
-		argPos++
-
-		set = append(set, fmt.Sprintf("canonical_url_hash = $%d", argPos))
-		args = append(args, canonicalURLHash)
-		argPos++
-
-		if sourceDomain != nil {
-			set = append(set, fmt.Sprintf("source_domain = $%d", argPos))
-			args = append(args, *sourceDomain)
-			argPos++
-		}
-	}
-
-	set = append(set, fmt.Sprintf("updated_at = $%d", argPos))
-	args = append(args, now.UTC())
 
 	q := fmt.Sprintf(`
-UPDATE news.articles
-SET
-	%s
-WHERE article_uuid = $1::uuid
-  AND deleted_at IS NULL
-`, strings.Join(set, ",\n\t"))
+	UPDATE news.articles
+	SET
+		%s
+	WHERE article_uuid = $1::uuid
+	  AND deleted_at IS NULL
+	`, strings.Join(plan.set, ",\n\t"))
 
-	tag, err := tx.Exec(ctx, q, args...)
+	tag, err := tx.Exec(ctx, q, plan.args...)
 	if err != nil {
 		return fmt.Errorf("update article: %w", err)
 	}
@@ -335,62 +165,227 @@ WHERE article_uuid = $1::uuid
 	return nil
 }
 
-func countTokens(text string) int {
-	if strings.TrimSpace(text) == "" {
-		return 0
+func lockArticleTextTx(ctx context.Context, tx Tx, articleUUID string) (string, error) {
+	const q = `
+	SELECT normalized_text
+	FROM news.articles
+	WHERE article_uuid = $1::uuid
+	  AND deleted_at IS NULL
+	FOR UPDATE
+	`
+	var normalizedText string
+	if err := tx.QueryRow(ctx, q, articleUUID).Scan(&normalizedText); err != nil {
+		if errors.Is(err, ErrNoRows) {
+			return "", ErrNoRows
+		}
+		return "", fmt.Errorf("lock article: %w", err)
 	}
-	return len(strings.Fields(text))
+	return normalizedText, nil
 }
 
-func simhash64(text string) (uint64, bool) {
-	tokens := tokenize(text)
-	if len(tokens) == 0 {
-		return 0, false
+func buildStoryUpdatePlan(storyUUID string, opts UpdateStoryOptions, now time.Time) (sqlUpdatePlan, error) {
+	fields, err := normalizeStoryUpdateFields(opts)
+	if err != nil {
+		return sqlUpdatePlan{}, err
 	}
-
-	var bitWeights [64]int
-	for _, token := range tokens {
-		h := hashToken64(token)
-		for bit := range 64 {
-			mask := uint64(1) << bit
-			if h&mask != 0 {
-				bitWeights[bit]++
-			} else {
-				bitWeights[bit]--
-			}
-		}
-	}
-
-	var result uint64
-	for bit := range 64 {
-		if bitWeights[bit] > 0 {
-			result |= uint64(1) << bit
-		}
-	}
-	return result, true
+	assignments := []sqlAssignment{}
+	assignments = appendPointerAssignment(assignments, "canonical_title", fields.title)
+	assignments = appendPointerAssignment(assignments, "status", fields.status)
+	assignments = appendPointerAssignment(assignments, "collection", fields.collection)
+	assignments = appendPointerAssignment(assignments, "canonical_url", fields.urlValue)
+	assignments = appendBytesAssignment(assignments, "canonical_url_hash", fields.urlValue, fields.urlHash)
+	return newSQLUpdatePlan(storyUUID, now, assignments), nil
 }
 
-func tokenize(text string) []string {
-	normalized := textnormalize.Text(text)
+func normalizeStoryUpdateFields(opts UpdateStoryOptions) (storyUpdateFields, error) {
+	if !storyUpdateHasFields(opts) {
+		return storyUpdateFields{}, fmt.Errorf("at least one update field is required")
+	}
+	fields := storyUpdateFields{}
+	if err := setTrimmedString(&fields.title, opts.Title, "title must not be empty"); err != nil {
+		return storyUpdateFields{}, err
+	}
+	if err := setLowerTrimmedString(&fields.status, opts.Status, "status must not be empty"); err != nil {
+		return storyUpdateFields{}, err
+	}
+	if err := setNormalizedCollection(&fields.collection, opts.Collection); err != nil {
+		return storyUpdateFields{}, err
+	}
+	if err := setCanonicalURL(&fields.urlValue, &fields.urlHash, nil, opts.URL); err != nil {
+		return storyUpdateFields{}, err
+	}
+	return fields, nil
+}
+
+func storyUpdateHasFields(opts UpdateStoryOptions) bool {
+	return opts.Title != nil || opts.Status != nil || opts.Collection != nil || opts.URL != nil
+}
+
+func normalizeArticleStaticUpdateFields(opts UpdateArticleOptions) (articleStaticUpdateFields, error) {
+	fields := articleStaticUpdateFields{}
+	if err := setTrimmedString(&fields.source, opts.Source, "source must not be empty"); err != nil {
+		return articleStaticUpdateFields{}, err
+	}
+	if err := setNormalizedCollection(&fields.collection, opts.Collection); err != nil {
+		return articleStaticUpdateFields{}, err
+	}
+	if err := setCanonicalURL(&fields.canonicalURL, &fields.canonicalURLHash, &fields.sourceDomain, opts.URL); err != nil {
+		return articleStaticUpdateFields{}, err
+	}
+	return fields, nil
+}
+
+func buildArticleUpdatePlan(
+	articleUUID string,
+	opts UpdateArticleOptions,
+	staticFields articleStaticUpdateFields,
+	existingNormalizedText string,
+	now time.Time,
+) (sqlUpdatePlan, error) {
+	titleFields, err := normalizeArticleTitleUpdateFields(opts.Title, existingNormalizedText)
+	if err != nil {
+		return sqlUpdatePlan{}, err
+	}
+	assignments := articleTitleAssignments(titleFields)
+	assignments = appendPointerAssignment(assignments, "source", staticFields.source)
+	assignments = appendPointerAssignment(assignments, "collection", staticFields.collection)
+	assignments = appendPointerAssignment(assignments, "canonical_url", staticFields.canonicalURL)
+	assignments = appendBytesAssignment(assignments, "canonical_url_hash", staticFields.canonicalURL, staticFields.canonicalURLHash)
+	assignments = appendPointerAssignment(assignments, "source_domain", staticFields.sourceDomain)
+	return newSQLUpdatePlan(articleUUID, now, assignments), nil
+}
+
+func normalizeArticleTitleUpdateFields(rawTitle *string, existingNormalizedText string) (articleTitleUpdateFields, error) {
+	if rawTitle == nil {
+		return articleTitleUpdateFields{}, nil
+	}
+	normalized := textnormalize.Text(*rawTitle)
 	if normalized == "" {
+		return articleTitleUpdateFields{}, fmt.Errorf("title must not be empty")
+	}
+	body := strings.TrimSpace(existingNormalizedText)
+	titleHash := sha256.Sum256([]byte(normalized))
+	contentHash := sha256.Sum256([]byte(normalized + "\n" + body))
+	count := textmetrics.CountTokens(normalized + " " + body)
+	fields := articleTitleUpdateFields{
+		normalizedTitle: &normalized,
+		titleHash:       append([]byte(nil), titleHash[:]...),
+		contentHash:     append([]byte(nil), contentHash[:]...),
+		tokenCount:      &count,
+	}
+	if value, ok := textmetrics.Simhash64(normalized); ok {
+		simhash := int64(value)
+		fields.titleSimhash = &simhash
+	}
+	return fields, nil
+}
+
+func articleTitleAssignments(fields articleTitleUpdateFields) []sqlAssignment {
+	if fields.normalizedTitle == nil {
 		return nil
 	}
-
-	parts := strings.FieldsFunc(normalized, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-	})
-	tokens := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		tokens = append(tokens, p)
-	}
-	return tokens
+	assignments := []sqlAssignment{}
+	assignments = appendPointerAssignment(assignments, "normalized_title", fields.normalizedTitle)
+	assignments = appendAssignment(assignments, "title_hash", fields.titleHash)
+	assignments = appendAssignment(assignments, "content_hash", fields.contentHash)
+	assignments = appendAssignment(assignments, "title_simhash", fields.titleSimhash)
+	assignments = appendPointerAssignment(assignments, "token_count", fields.tokenCount)
+	return assignments
 }
 
-func hashToken64(token string) uint64 {
-	hasher := fnv.New64a()
-	_, _ = hasher.Write([]byte(token))
-	return hasher.Sum64()
+func setTrimmedString(dest **string, source *string, emptyMessage string) error {
+	if source == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*source)
+	if trimmed == "" {
+		return fmt.Errorf("%s", emptyMessage)
+	}
+	*dest = &trimmed
+	return nil
+}
+
+func setLowerTrimmedString(dest **string, source *string, emptyMessage string) error {
+	if source == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(strings.ToLower(*source))
+	if trimmed == "" {
+		return fmt.Errorf("%s", emptyMessage)
+	}
+	*dest = &trimmed
+	return nil
+}
+
+func setNormalizedCollection(dest **string, source *string) error {
+	if source == nil {
+		return nil
+	}
+	normalized := normalizeCollection(*source)
+	if normalized == "" {
+		return fmt.Errorf("collection must not be empty")
+	}
+	*dest = &normalized
+	return nil
+}
+
+func setCanonicalURL(dest **string, hashDest *[]byte, hostDest **string, source *string) error {
+	if source == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*source)
+	if trimmed == "" {
+		return fmt.Errorf("url must not be empty")
+	}
+	normalized, host := textnormalize.URL(trimmed)
+	if normalized == "" {
+		return fmt.Errorf("url must be a fully-qualified URL")
+	}
+	*dest = &normalized
+	hash := sha256.Sum256([]byte(normalized))
+	*hashDest = append([]byte(nil), hash[:]...)
+	setURLHost(hostDest, host)
+	return nil
+}
+
+func setURLHost(dest **string, host string) {
+	if dest == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(strings.ToLower(host))
+	if trimmed == "" {
+		return
+	}
+	*dest = &trimmed
+}
+
+func appendAssignment(assignments []sqlAssignment, column string, value any) []sqlAssignment {
+	return append(assignments, sqlAssignment{column: column, value: value})
+}
+
+func appendPointerAssignment[T any](assignments []sqlAssignment, column string, value *T) []sqlAssignment {
+	if value == nil {
+		return assignments
+	}
+	return appendAssignment(assignments, column, *value)
+}
+
+func appendBytesAssignment(assignments []sqlAssignment, column string, gate *string, value []byte) []sqlAssignment {
+	if gate == nil {
+		return assignments
+	}
+	return appendAssignment(assignments, column, value)
+}
+
+func newSQLUpdatePlan(rowID string, now time.Time, assignments []sqlAssignment) sqlUpdatePlan {
+	set := make([]string, 0, len(assignments)+1)
+	args := make([]any, 0, len(assignments)+2)
+	args = append(args, rowID)
+	for _, assignment := range assignments {
+		set = append(set, fmt.Sprintf("%s = $%d", assignment.column, len(args)+1))
+		args = append(args, assignment.value)
+	}
+	set = append(set, fmt.Sprintf("updated_at = $%d", len(args)+1))
+	args = append(args, now.UTC())
+	return sqlUpdatePlan{set: set, args: args}
 }

@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -26,9 +25,9 @@ func (s *Server) handlePersonIdentities(c echo.Context) error {
 }
 
 func (s *Server) handleArticlePersonIdentities(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	articleUUID, err := articleUUIDFromParam(c)
+	if err != nil {
+		return err
 	}
 	identities, err := s.pool.ListPersonIdentitiesForArticleUUID(c.Request().Context(), articleUUID)
 	if err != nil {
@@ -39,9 +38,9 @@ func (s *Server) handleArticlePersonIdentities(c echo.Context) error {
 }
 
 func (s *Server) handleAddArticlePersonIdentity(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	articleUUID, err := articleUUIDFromParam(c)
+	if err != nil {
+		return err
 	}
 	var req articlePersonIdentityRequest
 	if err := decodeJSONBody(c, &req); err != nil {
@@ -51,49 +50,33 @@ func (s *Server) handleAddArticlePersonIdentity(c echo.Context) error {
 		return failValidation(c, map[string]string{"identity_ref": err.Error()})
 	}
 
-	principal, ok := principalFromContext(c)
+	actorUserID, ok := actorUserIDFromContext(c)
 	if !ok {
-		return unauthorizedResponse(c)
+		return nil
 	}
-	actorUserID := principal.UserID
-	identity, err := s.pool.AddArticlePersonIdentity(c.Request().Context(), articleUUID, req.IdentityRef, &actorUserID, globaltime.UTC())
+	identity, err := s.pool.AddArticlePersonIdentity(c.Request().Context(), articleUUID, req.IdentityRef, actorUserID, globaltime.UTC())
 	if err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"identity_ref": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("identity_ref", req.IdentityRef).Msg("add article person identity failed")
-		return internalError(c, "Failed to add article person identity")
+		return s.handleArticleRelationMutationError(c, err, "Article not found", "identity_ref", "identity_ref", req.IdentityRef, "add article person identity failed", "Failed to add article person identity")
 	}
 	return success(c, map[string]any{"article_uuid": articleUUID, "person_identity": identity})
 }
 
 func (s *Server) handleRemoveArticlePersonIdentity(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	articleUUID, err := articleUUIDFromParam(c)
+	if err != nil {
+		return err
 	}
 	identityRefOrUUID := strings.TrimSpace(c.Param("person_identity"))
 	if identityRefOrUUID == "" {
 		return failValidation(c, map[string]string{"person_identity": "is required"})
 	}
 
-	principal, ok := principalFromContext(c)
+	actorUserID, ok := actorUserIDFromContext(c)
 	if !ok {
-		return unauthorizedResponse(c)
+		return nil
 	}
-	actorUserID := principal.UserID
-	if err := s.pool.RemoveArticlePersonIdentity(c.Request().Context(), articleUUID, identityRefOrUUID, &actorUserID); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article or person identity not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"person_identity": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("person_identity", identityRefOrUUID).Msg("remove article person identity failed")
-		return internalError(c, "Failed to remove article person identity")
+	if err := s.pool.RemoveArticlePersonIdentity(c.Request().Context(), articleUUID, identityRefOrUUID, actorUserID); err != nil {
+		return s.handleArticleRelationMutationError(c, err, "Article or person identity not found", "person_identity", "person_identity", identityRefOrUUID, "remove article person identity failed", "Failed to remove article person identity")
 	}
 	return success(c, map[string]any{"article_uuid": articleUUID, "person_identity": identityRefOrUUID})
 }

@@ -17,7 +17,10 @@ func (p *Pool) autoMigrate(ctx context.Context) error {
 	if p == nil || p.gdb == nil {
 		return fmt.Errorf("database pool is not initialized")
 	}
+	return p.runAutoMigrate(ctx)
+}
 
+func (p *Pool) runAutoMigrate(ctx context.Context) error {
 	scripts := []struct {
 		name string
 		sql  string

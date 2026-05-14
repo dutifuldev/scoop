@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,16 +10,25 @@ import (
 	"time"
 
 	"horse.fit/scoop/internal/cli"
-	"horse.fit/scoop/internal/config"
 	"horse.fit/scoop/internal/db"
 	"horse.fit/scoop/internal/ingest"
-	"horse.fit/scoop/internal/logging"
 	payloadschema "horse.fit/scoop/schema"
 )
 
+type ingestCommandConfig struct {
+	envLoader        *cli.EnvLoader
+	timeout          time.Duration
+	payloadJSON      json.RawMessage
+	checkpointJSON   json.RawMessage
+	triggeredByTopic string
+}
+
 func runIngest(args []string) int {
-	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseIngestCommand, executeIngestCommand)
+}
+
+func parseIngestCommand(args []string) (ingestCommandConfig, int, bool) {
+	fs := newAppFlagSet("ingest")
 
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 20*time.Second, "Command timeout")
@@ -32,86 +40,91 @@ func runIngest(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return ingestCommandConfig{}, 0, false
 		}
-		return 2
-	}
-
-	if envLoader != nil {
-		if _, err := envLoader.Load(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		}
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		return 1
-	}
-
-	logger, err := logging.New(cfg.Environment, cfg.LogLevel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		return 1
+		return ingestCommandConfig{}, 2, false
 	}
 
 	payloadJSON, err := loadJSONInput(*payload, *payloadFile, "payload")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid payload: %v\n", err)
-		return 2
+		return ingestCommandConfig{}, 2, false
 	}
-
-	article, err := payloadschema.ValidateNewsItemPayload(payloadJSON)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid payload: %v\n", err)
-		return 2
-	}
-
-	payloadPublishedAt, err := parseOptionalRFC3339("payload.published_at", optionalString(article.PublishedAt))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid payload: %v\n", err)
-		return 2
-	}
-	collection, err := requiredMetadataString(article.SourceMetadata, "collection")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid payload: %v\n", err)
-		return 2
-	}
-
 	checkpointJSON, err := loadJSONInput(*checkpoint, *checkpointFile, "checkpoint")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid checkpoint: %v\n", err)
+		return ingestCommandConfig{}, 2, false
+	}
+	return ingestCommandConfig{
+		envLoader:        envLoader,
+		timeout:          *timeout,
+		payloadJSON:      payloadJSON,
+		checkpointJSON:   checkpointJSON,
+		triggeredByTopic: strings.TrimSpace(*triggeredByTopic),
+	}, 0, true
+}
+
+func executeIngestCommand(commandCfg ingestCommandConfig) int {
+	runtime, exitCode, ok := newCommandRuntimeBase(commandCfg.timeout, commandCfg.envLoader)
+	if !ok {
+		return exitCode
+	}
+	defer runtime.Close()
+
+	request, err := ingestRequestFromPayload(commandCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid payload: %v\n", err)
 		return 2
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-	defer cancel()
-
-	pool, err := db.NewPool(ctx, cfg)
+	pool, err := db.NewPool(runtime.ctx, runtime.cfg)
 	if err != nil {
-		logger.Error().Err(err).Msg("database connection failed")
+		runtime.logger.Error().Err(err).Msg("database connection failed")
 		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
 		return 1
 	}
-	defer pool.Close()
+	runtime.pool = pool
 
-	svc := ingest.NewService(pool, logger)
-	result, err := svc.IngestOne(ctx, ingest.Request{
-		Source:            strings.TrimSpace(article.Source),
-		SourceItemID:      strings.TrimSpace(article.SourceItemID),
-		Collection:        collection,
-		SourceItemURL:     optionalString(article.CanonicalURL),
-		SourcePublishedAt: payloadPublishedAt,
-		RawPayload:        payloadJSON,
-		CursorCheckpoint:  checkpointJSON,
-		TriggeredByTopic:  strings.TrimSpace(*triggeredByTopic),
-		ResponseHeaders:   nil,
-	})
+	svc := ingest.NewService(pool, runtime.logger)
+	result, err := svc.IngestOne(runtime.ctx, request)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Ingest failed: %v\n", err)
 		return 1
 	}
 
+	printIngestResult(result)
+	return 0
+}
+
+func ingestRequestFromPayload(commandCfg ingestCommandConfig) (ingest.Request, error) {
+	article, err := payloadschema.ValidateNewsItemPayload(commandCfg.payloadJSON)
+	if err != nil {
+		return ingest.Request{}, err
+	}
+
+	payloadPublishedAt, err := parseOptionalRFC3339("payload.published_at", pointerStringOrEmpty(article.PublishedAt))
+	if err != nil {
+		return ingest.Request{}, err
+	}
+	collection, err := requiredMetadataString(article.SourceMetadata, "collection")
+	if err != nil {
+		return ingest.Request{}, err
+	}
+
+	return ingest.Request{
+		Source:            strings.TrimSpace(article.Source),
+		SourceItemID:      strings.TrimSpace(article.SourceItemID),
+		Collection:        collection,
+		SourceItemURL:     pointerStringOrEmpty(article.CanonicalURL),
+		SourcePublishedAt: payloadPublishedAt,
+		RawPayload:        commandCfg.payloadJSON,
+		CursorCheckpoint:  commandCfg.checkpointJSON,
+		TriggeredByTopic:  commandCfg.triggeredByTopic,
+		ResponseHeaders:   nil,
+	}, nil
+}
+
+func printIngestResult(result ingest.Result) {
 	fmt.Printf("run_id=%d status=%s inserted=%t payload_hash=%s\n", result.RunID, result.Status, result.Inserted, result.PayloadHashHex)
 	fmt.Printf("run_uuid=%s\n", result.RunUUID)
 	if result.RawArrivalID != nil {
@@ -120,8 +133,6 @@ func runIngest(args []string) int {
 	if result.RawArrivalUUID != nil {
 		fmt.Printf("raw_arrival_uuid=%s\n", *result.RawArrivalUUID)
 	}
-
-	return 0
 }
 
 func loadJSONInput(inlineValue, filePath, label string) (json.RawMessage, error) {
@@ -155,13 +166,6 @@ func parseOptionalRFC3339(fieldName, raw string) (*time.Time, error) {
 	}
 	utc := ts.UTC()
 	return &utc, nil
-}
-
-func optionalString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
 }
 
 func requiredMetadataString(metadata map[string]any, key string) (string, error) {

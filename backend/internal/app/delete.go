@@ -4,114 +4,59 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"horse.fit/scoop/internal/cli"
 	"horse.fit/scoop/internal/db"
-	"horse.fit/scoop/internal/globaltime"
 )
 
+type deleteCommandConfig = targetActionCommandConfig
+
+var deleteCommandSpec = targetActionCommandSpec{
+	commandName:  "delete",
+	validTarget:  isDeleteTarget,
+	usage:        printDeleteUsage,
+	emptyMessage: "delete argument must not be empty",
+}
+
 func runDelete(args []string) int {
-	if len(args) == 0 {
-		printDeleteUsage()
-		return 2
-	}
+	return runParsedCommand(args, parseDeleteCommand, executeDeleteCommand)
+}
 
-	target := strings.ToLower(strings.TrimSpace(args[0]))
-	switch target {
-	case "story", "article", "collection", "before":
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown delete target: %s\n\n", args[0])
-		printDeleteUsage()
-		return 2
-	}
+func parseDeleteCommand(args []string) (deleteCommandConfig, int, bool) {
+	return parseTargetActionCommand(args, deleteCommandSpec)
+}
 
-	fs := flag.NewFlagSet("delete "+target, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+func isDeleteTarget(target string) bool {
+	return stringSliceContains([]string{"story", "article", "collection", "before"}, target)
+}
 
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	dryRun := fs.Bool("dry-run", false, "Preview affected rows without applying changes")
-	force := fs.Bool("force", false, "Skip confirmation prompt")
+func executeDeleteCommand(cfg deleteCommandConfig) int {
+	return executeConfirmedTargetAction(cfg, "delete", runDeleteTarget)
+}
 
-	if err := fs.Parse(args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "delete requires one argument")
-		printDeleteUsage()
-		return 2
-	}
-
-	arg := strings.TrimSpace(fs.Arg(0))
-	if arg == "" {
-		fmt.Fprintln(os.Stderr, "delete argument must not be empty")
-		return 2
-	}
-
-	if !*force {
-		ok, err := confirmDangerousAction(fmt.Sprintf("Proceed with delete %s %q?", target, arg))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read confirmation: %v\n", err)
-			return 1
-		}
-		if !ok {
-			fmt.Fprintln(os.Stderr, "Cancelled")
-			return 1
-		}
-	}
-
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-
-	now := globaltime.UTC()
-	switch target {
+func runDeleteTarget(ctx context.Context, pool *db.Pool, cfg deleteCommandConfig, now time.Time) int {
+	switch cfg.target {
 	case "story":
-		return runDeleteStory(ctx, pool, arg, now, *dryRun)
+		return runDeleteStory(ctx, pool, cfg.value, now, cfg.dryRun)
 	case "article":
-		return runDeleteArticle(ctx, pool, arg, now, *dryRun)
+		return runDeleteArticle(ctx, pool, cfg.value, now, cfg.dryRun)
 	case "collection":
-		return runDeleteCollection(ctx, pool, arg, now, *dryRun)
+		return runDeleteCollection(ctx, pool, cfg.value, now, cfg.dryRun)
 	default:
-		return runDeleteBefore(ctx, pool, arg, now, *dryRun)
+		return runDeleteBefore(ctx, pool, cfg.value, now, cfg.dryRun)
 	}
 }
 
 func runDeleteStory(ctx context.Context, pool *db.Pool, storyUUID string, now time.Time, dryRun bool) int {
-	return runSingleRowChange(ctx, pool, storyUUID, now, dryRun, singleRowChangeOptions{
-		affectedLabel: "stories_affected",
-		previewError:  "Failed to preview story delete",
-		applyError:    "Failed to soft delete story",
-		preview:       previewStoryDeleteCount,
-		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
-			return pool.SoftDeleteStory(ctx, id, now)
-		},
-	})
+	return runSingleRowChange(ctx, pool, storyUUID, now, dryRun, storyDeleteChangeOptions())
 }
 
 func runDeleteArticle(ctx context.Context, pool *db.Pool, articleUUID string, now time.Time, dryRun bool) int {
-	return runSingleRowChange(ctx, pool, articleUUID, now, dryRun, singleRowChangeOptions{
-		affectedLabel: "articles_affected",
-		previewError:  "Failed to preview article delete",
-		applyError:    "Failed to soft delete article",
-		preview:       previewArticleDeleteCount,
-		apply: func(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
-			return pool.SoftDeleteArticle(ctx, id, now)
-		},
-	})
+	return runSingleRowChange(ctx, pool, articleUUID, now, dryRun, articleDeleteChangeOptions())
 }
 
 func runDeleteCollection(ctx context.Context, pool *db.Pool, collection string, now time.Time, dryRun bool) int {
@@ -146,30 +91,38 @@ func runDeleteBefore(ctx context.Context, pool *db.Pool, beforeArg string, now t
 		fmt.Fprintf(os.Stderr, "Invalid before value: %v\n", err)
 		return 2
 	}
-
 	preview, err := previewBeforeDeleteCounts(ctx, pool, before)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to preview before delete: %v\n", err)
 		return 1
 	}
 	if dryRun {
-		fmt.Printf(
-			"dry_run=true before=%s raw_arrivals_affected=%d articles_affected=%d stories_affected=%d\n",
-			before.UTC().Format(time.RFC3339),
-			preview.RawArrivals,
-			preview.Articles,
-			preview.Stories,
-		)
-		return 0
+		return printDeleteBeforePreview(before, preview)
 	}
+	return applyDeleteBefore(ctx, pool, before, now)
+}
 
+func applyDeleteBefore(ctx context.Context, pool *db.Pool, before time.Time, now time.Time) int {
 	result, err := pool.SoftDeleteBefore(ctx, before, now)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to soft delete rows before cutoff: %v\n", err)
 		return 1
 	}
+	return printDeleteBeforeResult(before, result)
+}
+
+func printDeleteBeforePreview(before time.Time, preview db.SoftDeleteBeforeResult) int {
+	return printDeleteBeforeCounts("dry_run=true ", before, preview)
+}
+
+func printDeleteBeforeResult(before time.Time, result db.SoftDeleteBeforeResult) int {
+	return printDeleteBeforeCounts("", before, result)
+}
+
+func printDeleteBeforeCounts(prefix string, before time.Time, result db.SoftDeleteBeforeResult) int {
 	fmt.Printf(
-		"before=%s raw_arrivals_affected=%d articles_affected=%d stories_affected=%d\n",
+		"%sbefore=%s raw_arrivals_affected=%d articles_affected=%d stories_affected=%d\n",
+		prefix,
 		before.UTC().Format(time.RFC3339),
 		result.RawArrivals,
 		result.Articles,
@@ -179,28 +132,26 @@ func runDeleteBefore(ctx context.Context, pool *db.Pool, beforeArg string, now t
 }
 
 func previewStoryDeleteCount(ctx context.Context, pool *db.Pool, storyUUID string) (int64, error) {
-	const q = `
-SELECT COUNT(*)
-FROM news.stories
-WHERE story_uuid = $1::uuid
-  AND deleted_at IS NULL
-`
-	var count int64
-	if err := pool.QueryRow(ctx, q, strings.TrimSpace(storyUUID)).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
+	return previewDeletedStateCount(ctx, pool, "news.stories", "story_uuid", storyUUID, false)
 }
 
 func previewArticleDeleteCount(ctx context.Context, pool *db.Pool, articleUUID string) (int64, error) {
-	const q = `
+	return previewDeletedStateCount(ctx, pool, "news.articles", "article_uuid", articleUUID, false)
+}
+
+func previewDeletedStateCount(ctx context.Context, pool *db.Pool, tableName, uuidColumn, uuid string, deleted bool) (int64, error) {
+	deletedCondition := "deleted_at IS NULL"
+	if deleted {
+		deletedCondition = "deleted_at IS NOT NULL"
+	}
+	q := fmt.Sprintf(`
 SELECT COUNT(*)
-FROM news.articles
-WHERE article_uuid = $1::uuid
-  AND deleted_at IS NULL
-`
+FROM %s
+WHERE %s = $1::uuid
+  AND %s
+`, tableName, uuidColumn, deletedCondition)
 	var count int64
-	if err := pool.QueryRow(ctx, q, strings.TrimSpace(articleUUID)).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, q, strings.TrimSpace(uuid)).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -212,6 +163,38 @@ type singleRowChangeOptions struct {
 	applyError    string
 	preview       func(context.Context, *db.Pool, string) (int64, error)
 	apply         func(context.Context, *db.Pool, string, time.Time) (int64, error)
+}
+
+func storyDeleteChangeOptions() singleRowChangeOptions {
+	return newSingleRowChangeOptions("stories_affected", "story delete", "soft delete story", previewStoryDeleteCount, softDeleteStory)
+}
+
+func articleDeleteChangeOptions() singleRowChangeOptions {
+	return newSingleRowChangeOptions("articles_affected", "article delete", "soft delete article", previewArticleDeleteCount, softDeleteArticle)
+}
+
+func newSingleRowChangeOptions(
+	affectedLabel string,
+	previewAction string,
+	applyAction string,
+	preview func(context.Context, *db.Pool, string) (int64, error),
+	apply func(context.Context, *db.Pool, string, time.Time) (int64, error),
+) singleRowChangeOptions {
+	return singleRowChangeOptions{
+		affectedLabel: affectedLabel,
+		previewError:  fmt.Sprintf("Failed to preview %s", previewAction),
+		applyError:    fmt.Sprintf("Failed to %s", applyAction),
+		preview:       preview,
+		apply:         apply,
+	}
+}
+
+func softDeleteStory(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+	return pool.SoftDeleteStory(ctx, id, now)
+}
+
+func softDeleteArticle(ctx context.Context, pool *db.Pool, id string, now time.Time) (int64, error) {
+	return pool.SoftDeleteArticle(ctx, id, now)
 }
 
 func runSingleRowChange(ctx context.Context, pool *db.Pool, id string, now time.Time, dryRun bool, opts singleRowChangeOptions) int {
@@ -235,75 +218,59 @@ func runSingleRowChange(ctx context.Context, pool *db.Pool, id string, now time.
 }
 
 func previewCollectionDeleteCounts(ctx context.Context, pool *db.Pool, collection string) (db.SoftDeleteCollectionResult, error) {
-	var result db.SoftDeleteCollectionResult
-
 	const rawArrivalsQ = `
 SELECT COUNT(*)
 FROM news.raw_arrivals
 WHERE collection = $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, rawArrivalsQ, collection).Scan(&result.RawArrivals); err != nil {
-		return db.SoftDeleteCollectionResult{}, err
-	}
-
 	const articlesQ = `
 SELECT COUNT(*)
 FROM news.articles
 WHERE collection = $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, articlesQ, collection).Scan(&result.Articles); err != nil {
-		return db.SoftDeleteCollectionResult{}, err
-	}
-
 	const storiesQ = `
 SELECT COUNT(*)
 FROM news.stories
 WHERE collection = $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, storiesQ, collection).Scan(&result.Stories); err != nil {
-		return db.SoftDeleteCollectionResult{}, err
-	}
-
-	return result, nil
+	counts, err := previewDeleteCounts(ctx, pool, collection, []string{rawArrivalsQ, articlesQ, storiesQ})
+	return db.SoftDeleteCollectionResult{RawArrivals: counts[0], Articles: counts[1], Stories: counts[2]}, err
 }
 
 func previewBeforeDeleteCounts(ctx context.Context, pool *db.Pool, before time.Time) (db.SoftDeleteBeforeResult, error) {
-	var result db.SoftDeleteBeforeResult
-
 	const rawArrivalsQ = `
 SELECT COUNT(*)
 FROM news.raw_arrivals
 WHERE fetched_at < $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, rawArrivalsQ, before.UTC()).Scan(&result.RawArrivals); err != nil {
-		return db.SoftDeleteBeforeResult{}, err
-	}
-
 	const articlesQ = `
 SELECT COUNT(*)
 FROM news.articles
 WHERE created_at < $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, articlesQ, before.UTC()).Scan(&result.Articles); err != nil {
-		return db.SoftDeleteBeforeResult{}, err
-	}
-
 	const storiesQ = `
 SELECT COUNT(*)
 FROM news.stories
 WHERE last_seen_at < $1
   AND deleted_at IS NULL
 `
-	if err := pool.QueryRow(ctx, storiesQ, before.UTC()).Scan(&result.Stories); err != nil {
-		return db.SoftDeleteBeforeResult{}, err
-	}
+	counts, err := previewDeleteCounts(ctx, pool, before.UTC(), []string{rawArrivalsQ, articlesQ, storiesQ})
+	return db.SoftDeleteBeforeResult{RawArrivals: counts[0], Articles: counts[1], Stories: counts[2]}, err
+}
 
-	return result, nil
+func previewDeleteCounts(ctx context.Context, pool *db.Pool, arg any, queries []string) ([3]int64, error) {
+	var counts [3]int64
+	for idx, query := range queries {
+		if err := pool.QueryRow(ctx, query, arg).Scan(&counts[idx]); err != nil {
+			return [3]int64{}, err
+		}
+	}
+	return counts, nil
 }
 
 func parseDeleteBeforeArgument(raw string) (time.Time, error) {

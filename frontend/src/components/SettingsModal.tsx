@@ -61,7 +61,13 @@ export function SettingsModal({
 
   return (
     <div className="settings-overlay" onClick={onClose} role="presentation">
-      <section className="settings-modal card" role="dialog" aria-modal="true" aria-label="User settings" onClick={(event) => event.stopPropagation()}>
+      <section
+        className="settings-modal card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="User settings"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="settings-header">
           <h2>Settings</h2>
         </header>
@@ -70,9 +76,14 @@ export function SettingsModal({
           <label className="field">
             <span>Translate articles to:</span>
             <Select value={draftLanguage} onValueChange={setDraftLanguage}>
-              <SelectTrigger variant="default" className="settings-select-trigger" aria-label="Translate articles to">
+              <SelectTrigger
+                variant="default"
+                className="settings-select-trigger"
+                aria-label="Translate articles to"
+              >
                 <span>
-                  {options.find((option) => option.code === draftLanguage)?.label ?? draftLanguage.toUpperCase()}
+                  {options.find((option) => option.code === draftLanguage)?.label ??
+                    draftLanguage.toUpperCase()}
                 </span>
               </SelectTrigger>
               <SelectContent className="settings-select-content">

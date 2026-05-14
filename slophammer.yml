@@ -1,12 +1,15 @@
 go:
-  coverage_threshold: 16.5
-  dry_max_candidates: 55
+  coverage_threshold: 85
+  dry_max_candidates: 0
   dry_paths:
     - backend/cmd
     - backend/internal
     - backend/schema
   dry_exclude:
     - "**/*_test.go"
+    - "**/testdata/**"
+    - "**/fixtures/**"
+  crap_max_score: 8
   mutation_targets:
     - backend/internal/language/normalize.go
     - backend/internal/reader/preview.go
@@ -39,6 +42,7 @@ go:
         - backend/internal/config
         - backend/internal/language
         - backend/internal/normalize
+        - backend/internal/textmetrics
     - from: backend/internal/globaltime
       allow: []
     - from: backend/internal/httpapi
@@ -67,7 +71,11 @@ go:
         - backend/internal/globaltime
         - backend/internal/langdetect
         - backend/internal/normalize
+        - backend/internal/textmetrics
         - backend/schema
+    - from: backend/internal/textmetrics
+      allow:
+        - backend/internal/normalize
     - from: backend/internal/reader
       allow: []
     - from: backend/internal/translation

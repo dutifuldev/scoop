@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-minimum_coverage="${GO_COVERAGE_THRESHOLD:-16.5}"
+minimum_coverage="${GO_COVERAGE_THRESHOLD:-85}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 

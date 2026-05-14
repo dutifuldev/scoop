@@ -81,6 +81,43 @@ func TestValidateAcceptsMinimalConfig(t *testing.T) {
 	}
 }
 
+func TestLoadReadsEnvironmentAndValidates(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("NP_DB_MIN_CONNS", "2")
+	t.Setenv("NP_DB_MAX_CONNS", "4")
+	t.Setenv("DEFAULT_ADMIN_USER", "root")
+	t.Setenv("SESSION_TTL_HOURS", "24")
+	t.Setenv("SESSION_COOKIE_NAME", "sid")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://a.example, https://b.example")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.DatabaseURL != "postgres://example" {
+		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	}
+	if cfg.DBMinConns != 2 || cfg.DBMaxConns != 4 {
+		t.Fatalf("pool bounds = %d/%d, want 2/4", cfg.DBMinConns, cfg.DBMaxConns)
+	}
+	if cfg.DefaultAdminUser != "root" {
+		t.Fatalf("DefaultAdminUser = %q", cfg.DefaultAdminUser)
+	}
+}
+
+func TestLoadReturnsValidationError(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DEFAULT_ADMIN_USER", "admin")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), "DATABASE_URL is required") {
+		t.Fatalf("Load() error = %q", err.Error())
+	}
+}
+
 func TestCORSAllowedOriginsList(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,9 +13,19 @@ import (
 	"horse.fit/scoop/internal/db"
 )
 
+type storyDetailCommandConfig struct {
+	envLoader *cli.EnvLoader
+	timeout   time.Duration
+	format    string
+	storyUUID string
+}
+
 func runStoryDetail(args []string) int {
-	fs := flag.NewFlagSet("story", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseStoryDetailCommand, executeStoryDetailCommand)
+}
+
+func parseStoryDetailCommand(args []string) (storyDetailCommandConfig, int, bool) {
+	fs := newAppFlagSet("story")
 
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
@@ -22,59 +33,51 @@ func runStoryDetail(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return storyDetailCommandConfig{}, 0, false
 		}
-		return 2
+		return storyDetailCommandConfig{}, 2, false
 	}
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "Usage: scoop story <story_uuid> [--format table|json]")
-		return 2
+		return storyDetailCommandConfig{}, 2, false
 	}
 
 	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+		return storyDetailCommandConfig{}, 2, false
 	}
 
 	storyUUID := strings.TrimSpace(fs.Arg(0))
 	if storyUUID == "" {
 		fmt.Fprintln(os.Stderr, "story_uuid is required")
-		return 2
+		return storyDetailCommandConfig{}, 2, false
 	}
+	return storyDetailCommandConfig{
+		envLoader: envLoader,
+		timeout:   *timeout,
+		format:    outputFormat,
+		storyUUID: storyUUID,
+	}, 0, true
+}
 
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-
-	detail, err := pool.GetStoryDetail(ctx, storyUUID)
-	if err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			fmt.Fprintf(os.Stderr, "Story not found: %s\n", storyUUID)
+func executeStoryDetailCommand(cfg storyDetailCommandConfig) int {
+	return runWithReadPool(cfg.timeout, cfg.envLoader, func(ctx context.Context, pool *db.Pool) int {
+		detail, err := pool.GetStoryDetail(ctx, cfg.storyUUID)
+		if err != nil {
+			if errors.Is(err, db.ErrNoRows) {
+				fmt.Fprintf(os.Stderr, "Story not found: %s\n", cfg.storyUUID)
+				return 1
+			}
+			fmt.Fprintf(os.Stderr, "Failed to load story detail: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(os.Stderr, "Failed to load story detail: %v\n", err)
-		return 1
-	}
+		return renderStoryDetail(detail, cfg.format)
+	})
+}
 
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(detail); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-
-	if err := writeStoryDetailTable(detail); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
-		return 1
-	}
-
-	return 0
+func renderStoryDetail(detail *db.StoryDetail, outputFormat string) int {
+	return renderJSONOrTable(detail, outputFormat, func() error { return writeStoryDetailTable(detail) })
 }
 
 func writeStoryDetailTable(detail *db.StoryDetail) error {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,11 +10,24 @@ import (
 	"time"
 
 	"horse.fit/scoop/internal/cli"
+	"horse.fit/scoop/internal/db"
 )
 
+type searchCommandConfig struct {
+	envLoader  *cli.EnvLoader
+	timeout    time.Duration
+	query      string
+	collection string
+	limit      int
+	format     string
+}
+
 func runSearch(args []string) int {
-	fs := flag.NewFlagSet("search", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseSearchCommand, executeSearchCommand)
+}
+
+func parseSearchCommand(args []string) (searchCommandConfig, int, bool) {
+	fs := newAppFlagSet("search")
 
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
@@ -24,57 +38,47 @@ func runSearch(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return searchCommandConfig{}, 0, false
 		}
-		return 2
+		return searchCommandConfig{}, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "search does not accept positional arguments")
-		return 2
+		return searchCommandConfig{}, 2, false
 	}
 
 	trimmedQuery := strings.TrimSpace(*query)
 	if trimmedQuery == "" {
 		fmt.Fprintln(os.Stderr, "--query is required")
-		return 2
+		return searchCommandConfig{}, 2, false
 	}
 	if *limit <= 0 {
 		fmt.Fprintln(os.Stderr, "--limit must be > 0")
-		return 2
+		return searchCommandConfig{}, 2, false
 	}
 
 	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+		return searchCommandConfig{}, 2, false
 	}
+	return searchCommandConfig{
+		envLoader:  envLoader,
+		timeout:    *timeout,
+		query:      trimmedQuery,
+		collection: normalizeCollectionFlag(*collection),
+		limit:      *limit,
+		format:     outputFormat,
+	}, 0, true
+}
 
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+func executeSearchCommand(cfg searchCommandConfig) int {
+	load := func(ctx context.Context, pool *db.Pool) ([]db.StorySummary, error) {
+		return pool.SearchStoriesByTitle(ctx, cfg.query, cfg.collection, cfg.limit)
 	}
-	defer cancel()
-	defer pool.Close()
+	return runReadPoolList(cfg.timeout, cfg.envLoader, load, "Failed to search stories", renderStorySummaries, cfg.format)
+}
 
-	stories, err := pool.SearchStoriesByTitle(ctx, trimmedQuery, normalizeCollectionFlag(*collection), *limit)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to search stories: %v\n", err)
-		return 1
-	}
-
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(stories); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-
-	if err := writeStorySummaryTable(stories); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
-		return 1
-	}
-
-	return 0
+func renderStorySummaries(stories []db.StorySummary, outputFormat string) int {
+	return renderList(stories, outputFormat, writeStorySummaryTable)
 }

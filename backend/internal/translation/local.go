@@ -64,10 +64,10 @@ func (p *LocalProvider) Name() string {
 
 // ModelName returns the configured model identifier.
 func (p *LocalProvider) ModelName() string {
-	if p == nil {
-		return ""
+	if p != nil {
+		return p.model
 	}
-	return p.model
+	return ""
 }
 
 func (p *LocalProvider) SupportedLanguages() []string {
@@ -75,84 +75,111 @@ func (p *LocalProvider) SupportedLanguages() []string {
 }
 
 func (p *LocalProvider) Translate(ctx context.Context, req TranslateRequest) (*TranslateResponse, error) {
-	if p == nil {
-		return nil, fmt.Errorf("local provider is nil")
-	}
-	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		return nil, fmt.Errorf("text is required")
-	}
-
-	sourceLang := normalizeLangCode(req.SourceLang)
-	targetLang := normalizeLangCode(req.TargetLang)
-	if targetLang == "" {
-		return nil, fmt.Errorf("target language is required")
-	}
-
-	prompt := buildHYMTPrompt(text, sourceLang, targetLang)
-	body, err := json.Marshal(localChatRequest{
-		Model: p.model,
-		Messages: []localChatMessage{
-			{
-				Role:    "user",
-				Content: prompt,
-			},
-		},
-		Temperature: 0.7,
-		TopP:        0.6,
-	})
+	normalized, err := normalizeTranslateRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal translation request: %w", err)
+		return nil, err
 	}
 
 	started := time.Now()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpointURL, bytes.NewReader(body))
+	translated, err := p.sendTranslateRequest(ctx, normalized)
 	if err != nil {
-		return nil, fmt.Errorf("build translation request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send translation request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read translation response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var errPayload localChatErrorResponse
-		if unmarshalErr := json.Unmarshal(respBody, &errPayload); unmarshalErr == nil {
-			if msg := strings.TrimSpace(errPayload.Error.Message); msg != "" {
-				return nil, fmt.Errorf("translation endpoint status %d: %s", resp.StatusCode, msg)
-			}
-		}
-		return nil, fmt.Errorf("translation endpoint status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-
-	var parsed localChatResponse
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("decode translation response: %w", err)
-	}
-	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("translation response missing choices")
-	}
-
-	translated := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	if translated == "" {
-		return nil, fmt.Errorf("translation response was empty")
+		return nil, err
 	}
 
 	latency := time.Since(started).Milliseconds()
 	return &TranslateResponse{
 		Text:         translated,
-		SourceLang:   sourceLang,
-		TargetLang:   targetLang,
+		SourceLang:   normalized.SourceLang,
+		TargetLang:   normalized.TargetLang,
 		ProviderName: p.Name(),
 		LatencyMs:    latency,
 	}, nil
+}
+
+func normalizeTranslateRequest(req TranslateRequest) (TranslateRequest, error) {
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return TranslateRequest{}, fmt.Errorf("text is required")
+	}
+	targetLang := normalizeLangCode(req.TargetLang)
+	if targetLang == "" {
+		return TranslateRequest{}, fmt.Errorf("target language is required")
+	}
+	return TranslateRequest{
+		Text:       text,
+		SourceLang: normalizeLangCode(req.SourceLang),
+		TargetLang: targetLang,
+	}, nil
+}
+
+func (p *LocalProvider) sendTranslateRequest(ctx context.Context, req TranslateRequest) (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("local provider is nil")
+	}
+	body, err := json.Marshal(p.localChatRequest(req))
+	if err != nil {
+		return "", fmt.Errorf("marshal translation request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpointURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build translation request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("send translation request: %w", err)
+	}
+	defer resp.Body.Close()
+	return parseLocalChatHTTPResponse(resp)
+}
+
+func (p *LocalProvider) localChatRequest(req TranslateRequest) localChatRequest {
+	return localChatRequest{
+		Model: p.model,
+		Messages: []localChatMessage{{
+			Role:    "user",
+			Content: buildHYMTPrompt(req.Text, req.SourceLang, req.TargetLang),
+		}},
+		Temperature: 0.7,
+		TopP:        0.6,
+	}
+}
+
+func parseLocalChatHTTPResponse(resp *http.Response) (string, error) {
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read translation response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", localChatStatusError(resp.StatusCode, respBody)
+	}
+	return translatedTextFromLocalChatResponse(respBody)
+}
+
+func localChatStatusError(statusCode int, respBody []byte) error {
+	var errPayload localChatErrorResponse
+	if unmarshalErr := json.Unmarshal(respBody, &errPayload); unmarshalErr == nil {
+		if msg := strings.TrimSpace(errPayload.Error.Message); msg != "" {
+			return fmt.Errorf("translation endpoint status %d: %s", statusCode, msg)
+		}
+	}
+	return fmt.Errorf("translation endpoint status %d: %s", statusCode, strings.TrimSpace(string(respBody)))
+}
+
+func translatedTextFromLocalChatResponse(respBody []byte) (string, error) {
+	var parsed localChatResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", fmt.Errorf("decode translation response: %w", err)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("translation response missing choices")
+	}
+	translated := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	if translated == "" {
+		return "", fmt.Errorf("translation response was empty")
+	}
+	return translated, nil
 }
 
 type localChatRequest struct {

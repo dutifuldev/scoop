@@ -1,65 +1,42 @@
 package app
 
 import (
-	"errors"
-	"flag"
+	"context"
 	"fmt"
 	"os"
-	"time"
 
-	"horse.fit/scoop/internal/cli"
+	"horse.fit/scoop/internal/db"
 )
 
+type statsCommandConfig = noArgFormatCommandConfig
+
 func runStats(args []string) int {
-	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseStatsCommand, executeStatsCommand)
+}
 
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
+func parseStatsCommand(args []string) (statsCommandConfig, int, bool) {
+	return parseNoArgFormatCommand(args, "stats", outputFormatTable)
+}
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "stats does not accept positional arguments")
-		return 2
-	}
+func executeStatsCommand(cfg statsCommandConfig) int {
+	return runWithReadPool(cfg.timeout, cfg.envLoader, func(ctx context.Context, pool *db.Pool) int {
+		dayStart := defaultUTCDay()
+		_, dayEnd := utcDayBounds(dayStart)
 
-	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
-	}
-
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-
-	dayStart := defaultUTCDay()
-	_, dayEnd := utcDayBounds(dayStart)
-
-	stats, err := pool.QueryPipelineStats(ctx, dayStart, dayEnd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query pipeline stats: %v\n", err)
-		return 1
-	}
-
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(stats); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
+		stats, err := pool.QueryPipelineStats(ctx, dayStart, dayEnd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to query pipeline stats: %v\n", err)
 			return 1
 		}
-		return 0
-	}
+		return renderStats(stats, cfg.format)
+	})
+}
 
+func renderStats(stats *db.PipelineStats, outputFormat string) int {
+	return renderJSONOrTable(stats, outputFormat, func() error { return writeStatsTables(stats) })
+}
+
+func writeStatsTables(stats *db.PipelineStats) error {
 	collectionRows := make([][]string, 0, len(stats.Collections)+1)
 	for _, row := range stats.Collections {
 		collectionRows = append(collectionRows, []string{
@@ -77,8 +54,7 @@ func runStats(args []string) int {
 	})
 
 	if err := writeTable([]string{"collection", "articles", "stories", "embeddings"}, collectionRows); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render collection table: %v\n", err)
-		return 1
+		return fmt.Errorf("failed to render collection table: %w", err)
 	}
 
 	fmt.Println()
@@ -89,9 +65,7 @@ func runStats(args []string) int {
 		{"pending_not_deduped", fmt.Sprintf("%d", stats.Throughput.PendingNotDeduped)},
 	}
 	if err := writeTable([]string{"metric", "value"}, throughputRows); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render throughput table: %v\n", err)
-		return 1
+		return fmt.Errorf("failed to render throughput table: %w", err)
 	}
-
-	return 0
+	return nil
 }

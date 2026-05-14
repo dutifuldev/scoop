@@ -5,12 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"math/bits"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/rs/zerolog"
 
@@ -18,6 +16,7 @@ import (
 	"horse.fit/scoop/internal/globaltime"
 	"horse.fit/scoop/internal/langdetect"
 	textnormalize "horse.fit/scoop/internal/normalize"
+	"horse.fit/scoop/internal/textmetrics"
 	payloadschema "horse.fit/scoop/schema"
 )
 
@@ -60,6 +59,13 @@ type DedupOptions struct {
 	ModelName    string
 	ModelVersion string
 	LookbackDays int
+}
+
+type dedupRunConfig struct {
+	limit          int
+	modelName      string
+	modelVersion   string
+	lookbackCutoff time.Time
 }
 
 type rawArrivalRow struct {
@@ -153,6 +159,30 @@ const (
 	decisionGrayZone  dedupDecisionKind = "gray_zone"
 )
 
+const exactURLStoryQuery = `
+SELECT story_id
+FROM news.stories
+WHERE deleted_at IS NULL
+  AND status = 'active'
+  AND collection = $1
+  AND canonical_url_hash = $2
+ORDER BY last_seen_at DESC
+LIMIT 1
+`
+
+const exactContentHashStoryQuery = `
+SELECT sm.story_id
+FROM news.story_articles sm
+JOIN news.articles d ON d.article_id = sm.article_id AND d.deleted_at IS NULL
+JOIN news.stories s ON s.story_id = sm.story_id AND s.deleted_at IS NULL
+WHERE s.status = 'active'
+  AND s.collection = $1
+  AND d.collection = $1
+  AND d.content_hash = $2
+ORDER BY sm.matched_at DESC
+LIMIT 1
+`
+
 func NewService(pool *db.Pool, logger zerolog.Logger) *Service {
 	return &Service{
 		pool:   pool,
@@ -170,53 +200,77 @@ func (s *Service) NormalizePending(ctx context.Context, limit int) (NormalizeRes
 
 	var result NormalizeResult
 	for result.Processed < limit {
-		tx, err := s.pool.BeginTx(ctx, db.TxOptions{})
+		step, err := s.normalizeOnePending(ctx)
 		if err != nil {
-			return result, fmt.Errorf("begin normalize tx: %w", err)
-		}
-
-		row, found, err := claimOnePendingRawArrivalTx(ctx, tx)
-		if err != nil {
-			_ = tx.Rollback(ctx)
 			return result, err
 		}
-		if !found {
-			if err := tx.Commit(ctx); err != nil {
-				_ = tx.Rollback(ctx)
-				return result, fmt.Errorf("commit empty normalize tx: %w", err)
-			}
+		if !step.found {
 			break
 		}
-
-		article := buildNormalizedArticle(row, s.logger)
-		inserted, err := insertArticleTx(ctx, tx, article)
-		if err != nil {
-			_ = tx.Rollback(ctx)
-			return result, err
-		}
-
-		if err := tx.Commit(ctx); err != nil {
-			_ = tx.Rollback(ctx)
-			return result, fmt.Errorf("commit normalize tx: %w", err)
-		}
-
-		result.Processed++
-		if inserted {
-			result.Inserted++
-		}
+		result = applyNormalizeStep(result, step)
 	}
 
 	return result, nil
 }
 
-func (s *Service) DedupPending(ctx context.Context, opts DedupOptions) (DedupResult, error) {
-	if s == nil || s.pool == nil {
-		return DedupResult{}, fmt.Errorf("pipeline service is not initialized")
+func applyNormalizeStep(result NormalizeResult, step normalizeStepResult) NormalizeResult {
+	result.Processed++
+	if step.inserted {
+		result.Inserted++
 	}
-	if opts.Limit <= 0 {
+	return result
+}
+
+type normalizeStepResult struct {
+	found    bool
+	inserted bool
+}
+
+func (s *Service) normalizeOnePending(ctx context.Context) (normalizeStepResult, error) {
+	return runPipelineTx(ctx, s.pool, "normalize", func(tx db.Tx) (normalizeStepResult, error) {
+		row, found, err := claimOnePendingRawArrivalTx(ctx, tx)
+		if err != nil {
+			return normalizeStepResult{}, err
+		}
+		if !found {
+			return normalizeStepResult{}, nil
+		}
+		inserted, err := insertArticleTx(ctx, tx, buildNormalizedArticle(row, s.logger))
+		return normalizeStepResult{found: true, inserted: inserted}, err
+	})
+}
+
+func (s *Service) DedupPending(ctx context.Context, opts DedupOptions) (DedupResult, error) {
+	config, shouldRun, err := s.dedupRunConfig(opts)
+	if err != nil {
+		return DedupResult{}, err
+	}
+	if !shouldRun {
 		return DedupResult{}, nil
 	}
 
+	var result DedupResult
+	for result.Processed < config.limit {
+		decision, found, err := s.dedupOnePending(ctx, config.modelName, config.modelVersion, config.lookbackCutoff)
+		if err != nil {
+			return result, err
+		}
+		if !found {
+			break
+		}
+		result = applyDedupDecision(result, decision)
+	}
+
+	return result, nil
+}
+
+func (s *Service) dedupRunConfig(opts DedupOptions) (dedupRunConfig, bool, error) {
+	if s == nil || s.pool == nil {
+		return dedupRunConfig{}, false, fmt.Errorf("pipeline service is not initialized")
+	}
+	if opts.Limit <= 0 {
+		return dedupRunConfig{}, false, nil
+	}
 	modelName := strings.TrimSpace(opts.ModelName)
 	if modelName == "" {
 		modelName = DefaultEmbeddingModelName
@@ -229,54 +283,71 @@ func (s *Service) DedupPending(ctx context.Context, opts DedupOptions) (DedupRes
 	if lookbackDays <= 0 {
 		lookbackDays = DefaultDedupLookbackDays
 	}
-	lookbackCutoff := globaltime.UTC().AddDate(0, 0, -lookbackDays)
+	return dedupRunConfig{
+		limit:          opts.Limit,
+		modelName:      modelName,
+		modelVersion:   modelVersion,
+		lookbackCutoff: globaltime.UTC().AddDate(0, 0, -lookbackDays),
+	}, true, nil
+}
 
-	var result DedupResult
-	for result.Processed < opts.Limit {
-		tx, err := s.pool.BeginTx(ctx, db.TxOptions{})
-		if err != nil {
-			return result, fmt.Errorf("begin dedup tx: %w", err)
-		}
+func applyDedupDecision(result DedupResult, decision dedupDecisionKind) DedupResult {
+	if decision == decisionNone {
+		return result
+	}
+	result.Processed++
+	switch decision {
+	case decisionNewStory:
+		result.NewStories++
+	case decisionAutoMerge:
+		result.AutoMerges++
+	case decisionGrayZone:
+		result.GrayZones++
+	}
+	return result
+}
 
+func (s *Service) dedupOnePending(
+	ctx context.Context,
+	modelName string,
+	modelVersion string,
+	lookbackCutoff time.Time,
+) (dedupDecisionKind, bool, error) {
+	result, err := runPipelineTx(ctx, s.pool, "dedup", func(tx db.Tx) (dedupStepResult, error) {
 		article, found, err := claimOnePendingArticleTx(ctx, tx, modelName, modelVersion)
 		if err != nil {
-			_ = tx.Rollback(ctx)
-			return result, err
+			return dedupStepResult{}, err
 		}
 		if !found {
-			if err := tx.Commit(ctx); err != nil {
-				_ = tx.Rollback(ctx)
-				return result, fmt.Errorf("commit empty dedup tx: %w", err)
-			}
-			break
+			return dedupStepResult{}, nil
 		}
-
 		decision, err := dedupArticleTx(ctx, tx, article, modelName, modelVersion, lookbackCutoff)
-		if err != nil {
-			_ = tx.Rollback(ctx)
-			return result, err
-		}
+		return dedupStepResult{decision: decision, found: true}, err
+	})
+	return result.decision, result.found, err
+}
 
-		if err := tx.Commit(ctx); err != nil {
-			_ = tx.Rollback(ctx)
-			return result, fmt.Errorf("commit dedup tx: %w", err)
-		}
+type dedupStepResult struct {
+	decision dedupDecisionKind
+	found    bool
+}
 
-		if decision == decisionNone {
-			continue
-		}
-
-		result.Processed++
-		switch decision {
-		case decisionNewStory:
-			result.NewStories++
-		case decisionAutoMerge:
-			result.AutoMerges++
-		case decisionGrayZone:
-			result.GrayZones++
-		}
+func runPipelineTx[T any](ctx context.Context, pool *db.Pool, label string, fn func(db.Tx) (T, error)) (T, error) {
+	var zero T
+	tx, err := pool.BeginTx(ctx, db.TxOptions{})
+	if err != nil {
+		return zero, fmt.Errorf("begin %s tx: %w", label, err)
 	}
 
+	result, err := fn(tx)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return zero, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		_ = tx.Rollback(ctx)
+		return zero, fmt.Errorf("commit %s tx: %w", label, err)
+	}
 	return result, nil
 }
 
@@ -400,6 +471,16 @@ ON CONFLICT (raw_arrival_id) DO NOTHING
 	return commandTag.RowsAffected() == 1, nil
 }
 
+type normalizedArticleFields struct {
+	title        string
+	bodyText     string
+	language     string
+	canonicalURL string
+	sourceDomain string
+	collection   string
+	publishedAt  *time.Time
+}
+
 func buildNormalizedArticle(row rawArrivalRow, logger zerolog.Logger) normalizedArticle {
 	now := globaltime.UTC()
 	if row.FetchedAt.IsZero() {
@@ -408,133 +489,163 @@ func buildNormalizedArticle(row rawArrivalRow, logger zerolog.Logger) normalized
 
 	source := strings.TrimSpace(row.Source)
 	sourceItemID := strings.TrimSpace(row.SourceItemID)
+	fields := completeNormalizedArticleFields(row, sourceItemID, fieldsFromPayload(row, logger))
+	normalizedCanonicalURL, host := textnormalize.URL(fields.canonicalURL)
+	if fields.sourceDomain == "" {
+		fields.sourceDomain = host
+	}
 
-	var (
-		title        string
-		bodyText     string
-		language     string
-		canonicalURL string
-		sourceDomain string
-		collection   string
-		publishedAt  *time.Time
-	)
+	normalizedTitle := textnormalize.Text(fields.title)
+	if normalizedTitle == "" {
+		normalizedTitle = sourceItemID
+	}
+	normalizedBody := textnormalize.Text(fields.bodyText)
+	titleHash := sha256.Sum256([]byte(normalizedTitle))
+	contentHash := sha256.Sum256([]byte(normalizedTitle + "\n" + normalizedBody))
 
+	return normalizedArticle{
+		RawArrivalID:     row.RawArrivalID,
+		Source:           source,
+		SourceItemID:     sourceItemID,
+		Collection:       fields.collection,
+		CanonicalURL:     stringPtrIfNotEmpty(normalizedCanonicalURL),
+		CanonicalURLHash: hashBytesIfNotEmpty(normalizedCanonicalURL),
+		NormalizedTitle:  normalizedTitle,
+		NormalizedText:   normalizedBody,
+		NormalizedLang:   fields.language,
+		PublishedAt:      fields.publishedAt,
+		SourceDomain:     stringPtrIfNotEmpty(fields.sourceDomain),
+		TitleSimhash:     simhashPtr(normalizedTitle),
+		TextSimhash:      simhashPtr(normalizedBody),
+		TitleHash:        append([]byte(nil), titleHash[:]...),
+		ContentHash:      append([]byte(nil), contentHash[:]...),
+		TokenCount:       textmetrics.CountTokens(normalizedTitle + " " + normalizedBody),
+		ArticleCreatedAt: row.FetchedAt.UTC(),
+	}
+}
+
+func fieldsFromPayload(row rawArrivalRow, logger zerolog.Logger) normalizedArticleFields {
 	articlePayload, err := payloadschema.ValidateNewsItemPayload(row.RawPayload)
 	if err != nil {
 		logger.Warn().
 			Err(err).
 			Int64("raw_arrival_id", row.RawArrivalID).
 			Msg("payload schema validation failed during normalize; falling back to lenient extraction")
-	} else {
-		title = strings.TrimSpace(articlePayload.Title)
-		if articlePayload.BodyText != nil {
-			bodyText = strings.TrimSpace(*articlePayload.BodyText)
-		}
-		if articlePayload.Language != nil {
-			language = strings.TrimSpace(strings.ToLower(*articlePayload.Language))
-		}
-		if articlePayload.CanonicalURL != nil {
-			canonicalURL = strings.TrimSpace(*articlePayload.CanonicalURL)
-		}
-		if articlePayload.SourceDomain != nil {
-			sourceDomain = strings.TrimSpace(strings.ToLower(*articlePayload.SourceDomain))
-		}
-		collection = extractCollectionFromMetadata(articlePayload.SourceMetadata)
-		if articlePayload.PublishedAt != nil {
-			if ts, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(*articlePayload.PublishedAt)); parseErr == nil {
-				utc := ts.UTC()
-				publishedAt = &utc
-			}
-		}
+		return normalizedArticleFields{}
 	}
 
-	if title == "" {
-		title = sourceItemID
+	fields := normalizedArticleFields{
+		title: strings.TrimSpace(articlePayload.Title),
+		collection: extractCollectionFromMetadata(
+			articlePayload.SourceMetadata,
+		),
 	}
-	language = normalizeISO6391Language(language)
-	if language == "" || language == "und" {
-		detected := langdetect.DetectISO6391(strings.TrimSpace(title + "\n" + bodyText))
-		if detected != "" {
-			language = detected
-		}
+	if articlePayload.BodyText != nil {
+		fields.bodyText = strings.TrimSpace(*articlePayload.BodyText)
 	}
-	if language == "" {
-		language = "und"
+	if articlePayload.Language != nil {
+		fields.language = strings.TrimSpace(strings.ToLower(*articlePayload.Language))
 	}
-	if publishedAt == nil && row.SourcePublishedAt != nil {
-		utc := row.SourcePublishedAt.UTC()
-		publishedAt = &utc
+	if articlePayload.CanonicalURL != nil {
+		fields.canonicalURL = strings.TrimSpace(*articlePayload.CanonicalURL)
 	}
-	if canonicalURL == "" && row.SourceItemURL != nil {
-		canonicalURL = strings.TrimSpace(*row.SourceItemURL)
+	if articlePayload.SourceDomain != nil {
+		fields.sourceDomain = strings.TrimSpace(strings.ToLower(*articlePayload.SourceDomain))
+	}
+	if articlePayload.PublishedAt != nil {
+		fields.publishedAt = parsePayloadPublishedAt(*articlePayload.PublishedAt)
+	}
+	return fields
+}
+
+func completeNormalizedArticleFields(
+	row rawArrivalRow,
+	sourceItemID string,
+	fields normalizedArticleFields,
+) normalizedArticleFields {
+	if fields.title == "" {
+		fields.title = sourceItemID
+	}
+	fields.language = completeArticleLanguage(fields.language, fields.title, fields.bodyText)
+	fields.publishedAt = completePublishedAt(fields.publishedAt, row.SourcePublishedAt)
+	fields.canonicalURL = completeCanonicalURL(fields.canonicalURL, row.SourceItemURL)
+	fields.collection = completeCollection(fields.collection, row.Collection)
+	return fields
+}
+
+func parsePayloadPublishedAt(value string) *time.Time {
+	ts, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	if err != nil {
+		return nil
+	}
+	utc := ts.UTC()
+	return &utc
+}
+
+func completeArticleLanguage(language, title, bodyText string) string {
+	normalized := normalizeISO6391Language(language)
+	if normalized != "" && normalized != "und" {
+		return normalized
+	}
+	detected := langdetect.DetectISO6391(strings.TrimSpace(title + "\n" + bodyText))
+	if detected != "" {
+		return detected
+	}
+	return "und"
+}
+
+func completePublishedAt(payloadPublishedAt, sourcePublishedAt *time.Time) *time.Time {
+	if payloadPublishedAt != nil {
+		return payloadPublishedAt
+	}
+	if sourcePublishedAt == nil {
+		return nil
+	}
+	utc := sourcePublishedAt.UTC()
+	return &utc
+}
+
+func completeCanonicalURL(payloadCanonicalURL string, sourceItemURL *string) string {
+	if payloadCanonicalURL != "" || sourceItemURL == nil {
+		return payloadCanonicalURL
+	}
+	return strings.TrimSpace(*sourceItemURL)
+}
+
+func completeCollection(payloadCollection, rowCollection string) string {
+	collection := payloadCollection
+	if collection == "" {
+		collection = normalizeCollectionLabel(rowCollection)
 	}
 	if collection == "" {
-		collection = normalizeCollectionLabel(row.Collection)
+		return "unknown"
 	}
-	if collection == "" {
-		collection = "unknown"
-	}
+	return collection
+}
 
-	normalizedCanonicalURL, host := textnormalize.URL(canonicalURL)
-	if sourceDomain == "" {
-		sourceDomain = host
+func stringPtrIfNotEmpty(value string) *string {
+	if value == "" {
+		return nil
 	}
+	copy := value
+	return &copy
+}
 
-	normalizedTitle := textnormalize.Text(title)
-	if normalizedTitle == "" {
-		normalizedTitle = sourceItemID
+func hashBytesIfNotEmpty(value string) []byte {
+	if value == "" {
+		return nil
 	}
-	normalizedBody := textnormalize.Text(bodyText)
+	hash := sha256.Sum256([]byte(value))
+	return append([]byte(nil), hash[:]...)
+}
 
-	titleHash := sha256.Sum256([]byte(normalizedTitle))
-	contentHash := sha256.Sum256([]byte(normalizedTitle + "\n" + normalizedBody))
-
-	var canonicalURLHash []byte
-	var canonicalURLPtr *string
-	if normalizedCanonicalURL != "" {
-		hash := sha256.Sum256([]byte(normalizedCanonicalURL))
-		canonicalURLHash = append([]byte(nil), hash[:]...)
-		canonicalURLCopy := normalizedCanonicalURL
-		canonicalURLPtr = &canonicalURLCopy
+func simhashPtr(value string) *int64 {
+	hash, ok := textmetrics.Simhash64(value)
+	if !ok {
+		return nil
 	}
-
-	var sourceDomainPtr *string
-	if sourceDomain != "" {
-		sourceDomainCopy := sourceDomain
-		sourceDomainPtr = &sourceDomainCopy
-	}
-
-	var titleSimhashPtr *int64
-	if v, ok := simhash64(normalizedTitle); ok {
-		value := int64(v)
-		titleSimhashPtr = &value
-	}
-
-	var textSimhashPtr *int64
-	if v, ok := simhash64(normalizedBody); ok {
-		value := int64(v)
-		textSimhashPtr = &value
-	}
-
-	return normalizedArticle{
-		RawArrivalID:     row.RawArrivalID,
-		Source:           source,
-		SourceItemID:     sourceItemID,
-		Collection:       collection,
-		CanonicalURL:     canonicalURLPtr,
-		CanonicalURLHash: canonicalURLHash,
-		NormalizedTitle:  normalizedTitle,
-		NormalizedText:   normalizedBody,
-		NormalizedLang:   language,
-		PublishedAt:      publishedAt,
-		SourceDomain:     sourceDomainPtr,
-		TitleSimhash:     titleSimhashPtr,
-		TextSimhash:      textSimhashPtr,
-		TitleHash:        append([]byte(nil), titleHash[:]...),
-		ContentHash:      append([]byte(nil), contentHash[:]...),
-		TokenCount:       countTokens(normalizedTitle + " " + normalizedBody),
-		ArticleCreatedAt: row.FetchedAt.UTC(),
-	}
+	value64 := int64(hash)
+	return &value64
 }
 
 func claimOnePendingArticleTx(ctx context.Context, tx db.Tx, modelName, modelVersion string) (pendingArticle, bool, error) {
@@ -619,33 +730,14 @@ func dedupArticleTx(
 	lookbackCutoff time.Time,
 ) (dedupDecisionKind, error) {
 	now := globaltime.UTC()
-	articleSeenAt := article.ArticleCreatedAt
-	if article.PublishedAt != nil && !article.PublishedAt.IsZero() {
-		articleSeenAt = article.PublishedAt.UTC()
-	}
+	articleSeenAt := seenAtForArticle(article)
 
-	if storyID, found, err := findExactURLStoryTx(ctx, tx, article.Collection, article.CanonicalURLHash); err != nil {
+	exactMatch, found, err := findExactAutoMergeTx(ctx, tx, article)
+	if err != nil {
 		return decisionNone, err
-	} else if found {
-		return applyAutoMergeTx(ctx, tx, article, storyID, "exact_url", 1, map[string]any{
-			"signal": "exact_url",
-		}, now, articleSeenAt)
 	}
-
-	if storyID, found, err := findExactSourceIDStoryTx(ctx, tx, article.Collection, article.Source, article.SourceItemID); err != nil {
-		return decisionNone, err
-	} else if found {
-		return applyAutoMergeTx(ctx, tx, article, storyID, "exact_source_id", 1, map[string]any{
-			"signal": "exact_source_id",
-		}, now, articleSeenAt)
-	}
-
-	if storyID, found, err := findExactContentHashStoryTx(ctx, tx, article.Collection, article.ContentHash); err != nil {
-		return decisionNone, err
-	} else if found {
-		return applyAutoMergeTx(ctx, tx, article, storyID, "exact_content_hash", 1, map[string]any{
-			"signal": "exact_content_hash",
-		}, now, articleSeenAt)
+	if found {
+		return applyExactAutoMergeTx(ctx, tx, article, exactMatch, now, articleSeenAt)
 	}
 
 	lexicalMatch, hasLexicalAutoMerge, err := findLexicalAutoMergeTx(ctx, tx, article, lookbackCutoff)
@@ -653,77 +745,162 @@ func dedupArticleTx(
 		return decisionNone, err
 	}
 	if hasLexicalAutoMerge {
-		matchDetails := map[string]any{
-			"signal":           lexicalMatch.Signal,
-			"title_overlap":    lexicalMatch.TitleOverlap,
-			"date_consistency": lexicalMatch.DateConsistency,
-			"composite_score":  lexicalMatch.CompositeScore,
-			"match_score":      lexicalMatch.MatchScore,
-		}
-		if lexicalMatch.SimhashDistance != nil {
-			matchDetails["simhash_distance"] = *lexicalMatch.SimhashDistance
-		}
-		return applyAutoMergeTx(
-			ctx,
-			tx,
-			article,
-			lexicalMatch.Candidate.StoryID,
-			lexicalMatch.Signal,
-			lexicalMatch.MatchScore,
-			matchDetails,
-			now,
-			articleSeenAt,
-		)
+		return applyLexicalAutoMergeTx(ctx, tx, article, lexicalMatch, now, articleSeenAt)
 	}
 
-	var bestSemantic *semanticMatch
-	if article.EmbeddingVector != nil && strings.TrimSpace(*article.EmbeddingVector) != "" {
-		candidates, err := findSemanticCandidatesTx(
-			ctx,
-			tx,
-			strings.TrimSpace(*article.EmbeddingVector),
-			article.Collection,
-			modelName,
-			modelVersion,
-			lookbackCutoff,
-			defaultSemanticCandidateLimit,
-		)
-		if err != nil {
-			return decisionNone, err
-		}
+	semanticEval, err := evaluateSemanticDedupTx(ctx, tx, article, modelName, modelVersion, lookbackCutoff)
+	if err != nil {
+		return decisionNone, err
+	}
+	if semanticEval.autoMerge != nil {
+		return applySemanticAutoMergeTx(ctx, tx, article, *semanticEval.autoMerge, now, articleSeenAt)
+	}
+	return createSeedStoryWithEventTx(ctx, tx, article, semanticEval.best, now, articleSeenAt)
+}
 
-		for _, candidate := range candidates {
-			titleOverlap := titleTokenJaccard(article.NormalizedTitle, candidate.Title)
-			dateConsistency := computeDateConsistency(article.PublishedAt, candidate.LastSeenAt)
-			composite := semanticCompositeScore(candidate.Cosine, titleOverlap, dateConsistency)
-			current := semanticMatch{
-				Candidate:       candidate,
-				TitleOverlap:    titleOverlap,
-				DateConsistency: dateConsistency,
-				CompositeScore:  composite,
-			}
-			if bestSemantic == nil || current.CompositeScore > bestSemantic.CompositeScore {
-				match := current
-				bestSemantic = &match
-			}
+type exactAutoMergeMatch struct {
+	storyID int64
+	signal  string
+}
 
-			if shouldAutoMergeSemantic(candidate.Cosine, titleOverlap) {
-				return applySemanticAutoMergeTx(
-					ctx,
-					tx,
-					article,
-					candidate.StoryID,
-					candidate.Cosine,
-					titleOverlap,
-					dateConsistency,
-					composite,
-					now,
-					articleSeenAt,
-				)
-			}
+type semanticEvaluation struct {
+	best      *semanticMatch
+	autoMerge *semanticMatch
+}
+
+func seenAtForArticle(article pendingArticle) time.Time {
+	if article.PublishedAt != nil && !article.PublishedAt.IsZero() {
+		return article.PublishedAt.UTC()
+	}
+	return article.ArticleCreatedAt
+}
+
+func findExactAutoMergeTx(ctx context.Context, tx db.Tx, article pendingArticle) (exactAutoMergeMatch, bool, error) {
+	if storyID, found, err := findExactURLStoryTx(ctx, tx, article.Collection, article.CanonicalURLHash); err != nil || found {
+		return exactAutoMergeMatch{storyID: storyID, signal: "exact_url"}, found, err
+	}
+	if storyID, found, err := findExactSourceIDStoryTx(ctx, tx, article.Collection, article.Source, article.SourceItemID); err != nil || found {
+		return exactAutoMergeMatch{storyID: storyID, signal: "exact_source_id"}, found, err
+	}
+	storyID, found, err := findExactContentHashStoryTx(ctx, tx, article.Collection, article.ContentHash)
+	return exactAutoMergeMatch{storyID: storyID, signal: "exact_content_hash"}, found, err
+}
+
+func applyExactAutoMergeTx(
+	ctx context.Context,
+	tx db.Tx,
+	article pendingArticle,
+	match exactAutoMergeMatch,
+	now time.Time,
+	articleSeenAt time.Time,
+) (dedupDecisionKind, error) {
+	return applyAutoMergeTx(ctx, tx, article, match.storyID, match.signal, 1, map[string]any{
+		"signal": match.signal,
+	}, now, articleSeenAt)
+}
+
+func applyLexicalAutoMergeTx(
+	ctx context.Context,
+	tx db.Tx,
+	article pendingArticle,
+	match lexicalAutoMergeMatch,
+	now time.Time,
+	articleSeenAt time.Time,
+) (dedupDecisionKind, error) {
+	return applyAutoMergeTx(
+		ctx,
+		tx,
+		article,
+		match.Candidate.StoryID,
+		match.Signal,
+		match.MatchScore,
+		lexicalMatchDetails(match),
+		now,
+		articleSeenAt,
+	)
+}
+
+func lexicalMatchDetails(match lexicalAutoMergeMatch) map[string]any {
+	details := map[string]any{
+		"signal":           match.Signal,
+		"title_overlap":    match.TitleOverlap,
+		"date_consistency": match.DateConsistency,
+		"composite_score":  match.CompositeScore,
+		"match_score":      match.MatchScore,
+	}
+	if match.SimhashDistance != nil {
+		details["simhash_distance"] = *match.SimhashDistance
+	}
+	return details
+}
+
+func evaluateSemanticDedupTx(
+	ctx context.Context,
+	tx db.Tx,
+	article pendingArticle,
+	modelName string,
+	modelVersion string,
+	lookbackCutoff time.Time,
+) (semanticEvaluation, error) {
+	if article.EmbeddingVector == nil || strings.TrimSpace(*article.EmbeddingVector) == "" {
+		return semanticEvaluation{}, nil
+	}
+	candidates, err := findSemanticCandidatesTx(
+		ctx,
+		tx,
+		strings.TrimSpace(*article.EmbeddingVector),
+		article.Collection,
+		modelName,
+		modelVersion,
+		lookbackCutoff,
+		defaultSemanticCandidateLimit,
+	)
+	if err != nil {
+		return semanticEvaluation{}, err
+	}
+	return evaluateSemanticCandidates(article, candidates), nil
+}
+
+func evaluateSemanticCandidates(article pendingArticle, candidates []semanticCandidate) semanticEvaluation {
+	var evaluation semanticEvaluation
+	for _, candidate := range candidates {
+		match := semanticCandidateMatch(article, candidate)
+		evaluation = updateBestSemanticMatch(evaluation, match)
+		if shouldAutoMergeSemantic(candidate.Cosine, match.TitleOverlap) {
+			evaluation.autoMerge = &match
+			return evaluation
 		}
 	}
+	return evaluation
+}
 
+func semanticCandidateMatch(article pendingArticle, candidate semanticCandidate) semanticMatch {
+	titleOverlap := textmetrics.TitleTokenJaccard(article.NormalizedTitle, candidate.Title)
+	dateConsistency := computeDateConsistency(article.PublishedAt, candidate.LastSeenAt)
+	return semanticMatch{
+		Candidate:       candidate,
+		TitleOverlap:    titleOverlap,
+		DateConsistency: dateConsistency,
+		CompositeScore:  semanticCompositeScore(candidate.Cosine, titleOverlap, dateConsistency),
+	}
+}
+
+func updateBestSemanticMatch(evaluation semanticEvaluation, match semanticMatch) semanticEvaluation {
+	if evaluation.best == nil || match.CompositeScore > evaluation.best.CompositeScore {
+		best := match
+		evaluation.best = &best
+	}
+	return evaluation
+}
+
+func createSeedStoryWithEventTx(
+	ctx context.Context,
+	tx db.Tx,
+	article pendingArticle,
+	bestSemantic *semanticMatch,
+	now time.Time,
+	articleSeenAt time.Time,
+) (dedupDecisionKind, error) {
 	newStoryID, err := createStoryTx(ctx, tx, article, articleSeenAt, now)
 	if err != nil {
 		return decisionNone, err
@@ -738,38 +915,37 @@ func dedupArticleTx(
 	}
 
 	decision := decisionNewStory
-	var bestCandidateStoryID *int64
-	var titleOverlapPtr *float64
-	var entityDateConsistencyPtr *float64
-	var compositeScorePtr *float64
-	var bestCosinePtr *float64
-
+	event := newStoryDedupEvent(article.ArticleID, newStoryID, decision, now)
 	if bestSemantic != nil && shouldMarkSemanticGrayZone(bestSemantic.Candidate.Cosine) {
 		decision = decisionGrayZone
-		storyID := bestSemantic.Candidate.StoryID
-		bestCandidateStoryID = &storyID
-		bestCosinePtr = floatPtr(bestSemantic.Candidate.Cosine)
-		titleOverlapPtr = floatPtr(bestSemantic.TitleOverlap)
-		entityDateConsistencyPtr = floatPtr(bestSemantic.DateConsistency)
-		compositeScorePtr = floatPtr(bestSemantic.CompositeScore)
+		event = grayZoneDedupEvent(article.ArticleID, newStoryID, *bestSemantic, now)
 	}
-
-	if err := insertDedupEventTx(ctx, tx, dedupEventRecord{
-		ArticleID:             article.ArticleID,
-		Decision:              string(decision),
-		ChosenStoryID:         &newStoryID,
-		BestCandidateStoryID:  bestCandidateStoryID,
-		BestCosine:            bestCosinePtr,
-		TitleOverlap:          titleOverlapPtr,
-		EntityDateConsistency: entityDateConsistencyPtr,
-		CompositeScore:        compositeScorePtr,
-		ExactSignal:           nil,
-		CreatedAt:             now,
-	}); err != nil {
+	event.Decision = string(decision)
+	if err := insertDedupEventTx(ctx, tx, event); err != nil {
 		return decisionNone, err
 	}
 
 	return decision, nil
+}
+
+func newStoryDedupEvent(articleID int64, storyID int64, decision dedupDecisionKind, now time.Time) dedupEventRecord {
+	return dedupEventRecord{
+		ArticleID:     articleID,
+		Decision:      string(decision),
+		ChosenStoryID: &storyID,
+		CreatedAt:     now,
+	}
+}
+
+func grayZoneDedupEvent(articleID int64, storyID int64, match semanticMatch, now time.Time) dedupEventRecord {
+	event := newStoryDedupEvent(articleID, storyID, decisionGrayZone, now)
+	candidateStoryID := match.Candidate.StoryID
+	event.BestCandidateStoryID = &candidateStoryID
+	event.BestCosine = floatPtr(match.Candidate.Cosine)
+	event.TitleOverlap = floatPtr(match.TitleOverlap)
+	event.EntityDateConsistency = floatPtr(match.DateConsistency)
+	event.CompositeScore = floatPtr(match.CompositeScore)
+	return event
 }
 
 func applyAutoMergeTx(
@@ -816,29 +992,25 @@ func applySemanticAutoMergeTx(
 	ctx context.Context,
 	tx db.Tx,
 	article pendingArticle,
-	storyID int64,
-	cosine float64,
-	titleOverlap float64,
-	dateConsistency float64,
-	composite float64,
+	match semanticMatch,
 	now time.Time,
 	articleSeenAt time.Time,
 ) (dedupDecisionKind, error) {
 	matchDetails := map[string]any{
 		"signal":           "semantic",
-		"cosine":           cosine,
-		"title_overlap":    titleOverlap,
-		"date_consistency": dateConsistency,
-		"composite_score":  composite,
+		"cosine":           match.Candidate.Cosine,
+		"title_overlap":    match.TitleOverlap,
+		"date_consistency": match.DateConsistency,
+		"composite_score":  match.CompositeScore,
 	}
 
 	if inserted, err := upsertStoryArticleTx(
 		ctx,
 		tx,
-		storyID,
+		match.Candidate.StoryID,
 		article.ArticleID,
 		"semantic",
-		floatPtr(composite),
+		floatPtr(match.CompositeScore),
 		matchDetails,
 		now,
 	); err != nil {
@@ -850,7 +1022,7 @@ func applySemanticAutoMergeTx(
 	if err := updateStoryMetadataTx(
 		ctx,
 		tx,
-		storyID,
+		match.Candidate.StoryID,
 		article.ArticleID,
 		article.NormalizedTitle,
 		article.CanonicalURL,
@@ -862,15 +1034,16 @@ func applySemanticAutoMergeTx(
 	}
 
 	signal := "semantic"
+	storyID := match.Candidate.StoryID
 	if err := insertDedupEventTx(ctx, tx, dedupEventRecord{
 		ArticleID:             article.ArticleID,
 		Decision:              string(decisionAutoMerge),
 		ChosenStoryID:         &storyID,
 		BestCandidateStoryID:  &storyID,
-		BestCosine:            floatPtr(cosine),
-		TitleOverlap:          floatPtr(titleOverlap),
-		EntityDateConsistency: floatPtr(dateConsistency),
-		CompositeScore:        floatPtr(composite),
+		BestCosine:            floatPtr(match.Candidate.Cosine),
+		TitleOverlap:          floatPtr(match.TitleOverlap),
+		EntityDateConsistency: floatPtr(match.DateConsistency),
+		CompositeScore:        floatPtr(match.CompositeScore),
 		ExactSignal:           &signal,
 		CreatedAt:             now,
 	}); err != nil {
@@ -900,28 +1073,7 @@ func matchTypeForSignal(signal string) string {
 }
 
 func findExactURLStoryTx(ctx context.Context, tx db.Tx, collection string, canonicalURLHash []byte) (int64, bool, error) {
-	if len(canonicalURLHash) == 0 {
-		return 0, false, nil
-	}
-	const q = `
-SELECT story_id
-FROM news.stories
-WHERE deleted_at IS NULL
-  AND status = 'active'
-  AND collection = $1
-  AND canonical_url_hash = $2
-ORDER BY last_seen_at DESC
-LIMIT 1
-`
-	var storyID int64
-	err := tx.QueryRow(ctx, q, collection, canonicalURLHash).Scan(&storyID)
-	if err != nil {
-		if err == db.ErrNoRows {
-			return 0, false, nil
-		}
-		return 0, false, fmt.Errorf("find exact_url story: %w", err)
-	}
-	return storyID, true, nil
+	return findHashMatchedStoryID(ctx, tx, "find exact_url story", exactURLStoryQuery, collection, canonicalURLHash)
 }
 
 func findExactSourceIDStoryTx(ctx context.Context, tx db.Tx, collection, source, sourceItemID string) (int64, bool, error) {
@@ -937,41 +1089,29 @@ WHERE s.status = 'active'
   AND d.source_item_id = $3
 ORDER BY sm.matched_at DESC
 LIMIT 1
-`
-	var storyID int64
-	err := tx.QueryRow(ctx, q, collection, source, sourceItemID).Scan(&storyID)
-	if err != nil {
-		if err == db.ErrNoRows {
-			return 0, false, nil
-		}
-		return 0, false, fmt.Errorf("find exact_source_id story: %w", err)
-	}
-	return storyID, true, nil
+	`
+	return queryMatchedStoryID(ctx, tx, "find exact_source_id story", q, collection, source, sourceItemID)
 }
 
 func findExactContentHashStoryTx(ctx context.Context, tx db.Tx, collection string, contentHash []byte) (int64, bool, error) {
-	if len(contentHash) == 0 {
+	return findHashMatchedStoryID(ctx, tx, "find exact_content_hash story", exactContentHashStoryQuery, collection, contentHash)
+}
+
+func findHashMatchedStoryID(ctx context.Context, tx db.Tx, label string, query string, collection string, hash []byte) (int64, bool, error) {
+	if len(hash) == 0 {
 		return 0, false, nil
 	}
-	const q = `
-SELECT sm.story_id
-FROM news.story_articles sm
-JOIN news.articles d ON d.article_id = sm.article_id AND d.deleted_at IS NULL
-JOIN news.stories s ON s.story_id = sm.story_id AND s.deleted_at IS NULL
-WHERE s.status = 'active'
-  AND s.collection = $1
-  AND d.collection = $1
-  AND d.content_hash = $2
-ORDER BY sm.matched_at DESC
-LIMIT 1
-`
+	return queryMatchedStoryID(ctx, tx, label, query, collection, hash)
+}
+
+func queryMatchedStoryID(ctx context.Context, tx db.Tx, label string, query string, args ...any) (int64, bool, error) {
 	var storyID int64
-	err := tx.QueryRow(ctx, q, collection, contentHash).Scan(&storyID)
+	err := tx.QueryRow(ctx, query, args...).Scan(&storyID)
 	if err != nil {
 		if err == db.ErrNoRows {
 			return 0, false, nil
 		}
-		return 0, false, fmt.Errorf("find exact_content_hash story: %w", err)
+		return 0, false, fmt.Errorf("%s: %w", label, err)
 	}
 	return storyID, true, nil
 }
@@ -1077,84 +1217,130 @@ LIMIT $1
 	}
 	defer rows.Close()
 
-	bestSimhashDistance := 65
-	var bestSimhash lexicalAutoMergeMatch
-	var hasSimhash bool
+	candidates, err := scanLexicalCandidates(rows)
+	if err != nil {
+		return lexicalAutoMergeMatch{}, false, err
+	}
+	match := bestLexicalAutoMerge(article, candidates)
+	return match, match != (lexicalAutoMergeMatch{}), nil
+}
 
-	var bestOverlap lexicalAutoMergeMatch
-	var hasOverlap bool
-
+func scanLexicalCandidates(rows *db.Rows) ([]storyCandidate, error) {
+	candidates := make([]storyCandidate, 0, storyCandidateLimit)
 	for rows.Next() {
-		var c storyCandidate
-		var canonicalURL *string
-		var titleSimhash *int64
-		if err := rows.Scan(
-			&c.StoryID,
-			&c.Title,
-			&c.LastSeenAt,
-			&c.SourceCount,
-			&c.ArticleCount,
-			&canonicalURL,
-			&titleSimhash,
-		); err != nil {
-			return lexicalAutoMergeMatch{}, false, fmt.Errorf("scan lexical candidate: %w", err)
+		candidate, err := scanLexicalCandidate(rows)
+		if err != nil {
+			return nil, err
 		}
-		c.CanonicalURL = canonicalURL
-		c.TitleSimhash = titleSimhash
-
-		dateConsistency := computeDateConsistency(article.PublishedAt, c.LastSeenAt)
-
-		if distance, ok := titleSimhashDistance(article.TitleSimhash, c.TitleSimhash); ok && distance <= defaultLexicalSimhashMaxDistance {
-			score := 1 - (float64(distance) / 64.0)
-			if !hasSimhash || distance < bestSimhashDistance || (distance == bestSimhashDistance && c.LastSeenAt.After(bestSimhash.Candidate.LastSeenAt)) {
-				distanceCopy := distance
-				bestSimhash = lexicalAutoMergeMatch{
-					Candidate:       c,
-					Signal:          "lexical_simhash",
-					MatchScore:      score,
-					TitleOverlap:    titleTokenJaccard(article.NormalizedTitle, c.Title),
-					DateConsistency: dateConsistency,
-					CompositeScore:  score,
-					SimhashDistance: &distanceCopy,
-				}
-				bestSimhashDistance = distance
-				hasSimhash = true
-			}
-		}
-
-		overlap := titleTrigramJaccard(article.NormalizedTitle, c.Title)
-		if overlap < defaultLexicalTrigramThreshold {
-			continue
-		}
-		if !isWithinDateWindow(article.PublishedAt, c.LastSeenAt, defaultLexicalTrigramDateWindow) {
-			continue
-		}
-
-		composite := (0.8 * overlap) + (0.2 * dateConsistency)
-		if !hasOverlap || composite > bestOverlap.CompositeScore {
-			bestOverlap = lexicalAutoMergeMatch{
-				Candidate:       c,
-				Signal:          "lexical_overlap",
-				MatchScore:      composite,
-				TitleOverlap:    overlap,
-				DateConsistency: dateConsistency,
-				CompositeScore:  composite,
-			}
-			hasOverlap = true
-		}
+		candidates = append(candidates, candidate)
 	}
-
 	if err := rows.Err(); err != nil {
-		return lexicalAutoMergeMatch{}, false, fmt.Errorf("iterate lexical candidates: %w", err)
+		return nil, fmt.Errorf("iterate lexical candidates: %w", err)
 	}
+	return candidates, nil
+}
 
-	if hasSimhash {
-		return bestSimhash, true, nil
+func scanLexicalCandidate(rows *db.Rows) (storyCandidate, error) {
+	var c storyCandidate
+	var canonicalURL *string
+	var titleSimhash *int64
+	if err := rows.Scan(
+		&c.StoryID,
+		&c.Title,
+		&c.LastSeenAt,
+		&c.SourceCount,
+		&c.ArticleCount,
+		&canonicalURL,
+		&titleSimhash,
+	); err != nil {
+		return storyCandidate{}, fmt.Errorf("scan lexical candidate: %w", err)
 	}
-	if hasOverlap {
-		return bestOverlap, true, nil
+	c.CanonicalURL = canonicalURL
+	c.TitleSimhash = titleSimhash
+	return c, nil
+}
+
+func bestLexicalAutoMerge(article pendingArticle, candidates []storyCandidate) lexicalAutoMergeMatch {
+	if match, ok := bestLexicalSimhashMatch(article, candidates); ok {
+		return match
 	}
-	return lexicalAutoMergeMatch{}, false, nil
+	if match, ok := bestLexicalOverlapMatch(article, candidates); ok {
+		return match
+	}
+	return lexicalAutoMergeMatch{}
+}
+
+func bestLexicalSimhashMatch(article pendingArticle, candidates []storyCandidate) (lexicalAutoMergeMatch, bool) {
+	bestDistance := 65
+	var best lexicalAutoMergeMatch
+	var found bool
+	for _, candidate := range candidates {
+		match, distance, ok := lexicalSimhashMatch(article, candidate)
+		if !ok || (found && !isBetterSimhashMatch(match, distance, best, bestDistance)) {
+			continue
+		}
+		best = match
+		bestDistance = distance
+		found = true
+	}
+	return best, found
+}
+
+func lexicalSimhashMatch(article pendingArticle, candidate storyCandidate) (lexicalAutoMergeMatch, int, bool) {
+	distance, ok := titleSimhashDistance(article.TitleSimhash, candidate.TitleSimhash)
+	if !ok || distance > defaultLexicalSimhashMaxDistance {
+		return lexicalAutoMergeMatch{}, 0, false
+	}
+	score := 1 - (float64(distance) / 64.0)
+	distanceCopy := distance
+	return lexicalAutoMergeMatch{
+		Candidate:       candidate,
+		Signal:          "lexical_simhash",
+		MatchScore:      score,
+		TitleOverlap:    textmetrics.TitleTokenJaccard(article.NormalizedTitle, candidate.Title),
+		DateConsistency: computeDateConsistency(article.PublishedAt, candidate.LastSeenAt),
+		CompositeScore:  score,
+		SimhashDistance: &distanceCopy,
+	}, distance, true
+}
+
+func isBetterSimhashMatch(current lexicalAutoMergeMatch, currentDistance int, best lexicalAutoMergeMatch, bestDistance int) bool {
+	return currentDistance < bestDistance ||
+		(currentDistance == bestDistance && current.Candidate.LastSeenAt.After(best.Candidate.LastSeenAt))
+}
+
+func bestLexicalOverlapMatch(article pendingArticle, candidates []storyCandidate) (lexicalAutoMergeMatch, bool) {
+	var best lexicalAutoMergeMatch
+	var found bool
+	for _, candidate := range candidates {
+		match, ok := lexicalOverlapMatch(article, candidate)
+		if !ok || (found && match.CompositeScore <= best.CompositeScore) {
+			continue
+		}
+		best = match
+		found = true
+	}
+	return best, found
+}
+
+func lexicalOverlapMatch(article pendingArticle, candidate storyCandidate) (lexicalAutoMergeMatch, bool) {
+	overlap := textmetrics.TitleTrigramJaccard(article.NormalizedTitle, candidate.Title)
+	if overlap < defaultLexicalTrigramThreshold {
+		return lexicalAutoMergeMatch{}, false
+	}
+	if !isWithinDateWindow(article.PublishedAt, candidate.LastSeenAt, defaultLexicalTrigramDateWindow) {
+		return lexicalAutoMergeMatch{}, false
+	}
+	dateConsistency := computeDateConsistency(article.PublishedAt, candidate.LastSeenAt)
+	composite := (0.8 * overlap) + (0.2 * dateConsistency)
+	return lexicalAutoMergeMatch{
+		Candidate:       candidate,
+		Signal:          "lexical_overlap",
+		MatchScore:      composite,
+		TitleOverlap:    overlap,
+		DateConsistency: dateConsistency,
+		CompositeScore:  composite,
+	}, true
 }
 
 func createStoryTx(
@@ -1373,144 +1559,6 @@ func normalizeISO6391Language(raw string) string {
 		}
 	}
 	return lang
-}
-
-func countTokens(text string) int {
-	if strings.TrimSpace(text) == "" {
-		return 0
-	}
-	return len(strings.Fields(text))
-}
-
-func simhash64(text string) (uint64, bool) {
-	tokens := tokenize(text)
-	if len(tokens) == 0 {
-		return 0, false
-	}
-
-	var bitWeights [64]int
-	for _, token := range tokens {
-		h := hashToken64(token)
-		for bit := range 64 {
-			mask := uint64(1) << bit
-			if h&mask != 0 {
-				bitWeights[bit]++
-			} else {
-				bitWeights[bit]--
-			}
-		}
-	}
-
-	var result uint64
-	for bit := range 64 {
-		if bitWeights[bit] > 0 {
-			result |= uint64(1) << bit
-		}
-	}
-	return result, true
-}
-
-func tokenize(text string) []string {
-	normalized := textnormalize.Text(text)
-	if normalized == "" {
-		return nil
-	}
-
-	parts := strings.FieldsFunc(normalized, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-	})
-	tokens := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		tokens = append(tokens, p)
-	}
-	return tokens
-}
-
-func hashToken64(token string) uint64 {
-	hasher := fnv.New64a()
-	_, _ = hasher.Write([]byte(token))
-	return hasher.Sum64()
-}
-
-func titleTokenJaccard(left, right string) float64 {
-	leftSet := tokenSet(left)
-	rightSet := tokenSet(right)
-	if len(leftSet) == 0 || len(rightSet) == 0 {
-		return 0
-	}
-
-	intersection := 0
-	for token := range leftSet {
-		if _, ok := rightSet[token]; ok {
-			intersection++
-		}
-	}
-	if intersection == 0 {
-		return 0
-	}
-
-	union := len(leftSet) + len(rightSet) - intersection
-	if union <= 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-func tokenSet(text string) map[string]struct{} {
-	tokens := tokenize(text)
-	if len(tokens) == 0 {
-		return nil
-	}
-	set := make(map[string]struct{}, len(tokens))
-	for _, token := range tokens {
-		set[token] = struct{}{}
-	}
-	return set
-}
-
-func titleTrigramJaccard(left, right string) float64 {
-	leftSet := trigramSet(left)
-	rightSet := trigramSet(right)
-	if len(leftSet) == 0 || len(rightSet) == 0 {
-		return 0
-	}
-
-	intersection := 0
-	for token := range leftSet {
-		if _, ok := rightSet[token]; ok {
-			intersection++
-		}
-	}
-	if intersection == 0 {
-		return 0
-	}
-
-	union := len(leftSet) + len(rightSet) - intersection
-	if union <= 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-func trigramSet(text string) map[string]struct{} {
-	normalized := textnormalize.Text(text)
-	if normalized == "" {
-		return nil
-	}
-
-	runes := []rune(normalized)
-	if len(runes) < 3 {
-		return map[string]struct{}{string(runes): {}}
-	}
-
-	set := make(map[string]struct{}, len(runes)-2)
-	for i := 0; i <= len(runes)-3; i++ {
-		set[string(runes[i:i+3])] = struct{}{}
-	}
-	return set
 }
 
 func titleSimhashDistance(left, right *int64) (int, bool) {

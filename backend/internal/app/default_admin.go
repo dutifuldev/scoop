@@ -14,18 +14,35 @@ import (
 )
 
 func ensureDefaultAdmin(ctx context.Context, pool *db.Pool, cfg *config.Config, logger zerolog.Logger) error {
-	if pool == nil || cfg == nil {
-		return fmt.Errorf("ensure default admin: missing dependencies")
+	if err := validateDefaultAdminDeps(pool, cfg); err != nil {
+		return err
 	}
-
-	userCount, err := pool.CountUsers(ctx)
+	shouldCreate, err := shouldCreateDefaultAdmin(ctx, pool)
 	if err != nil {
 		return err
 	}
-	if userCount > 0 {
+	if !shouldCreate {
 		return nil
 	}
+	return createDefaultAdmin(ctx, pool, cfg, logger)
+}
 
+func validateDefaultAdminDeps(pool *db.Pool, cfg *config.Config) error {
+	if pool == nil || cfg == nil {
+		return fmt.Errorf("ensure default admin: missing dependencies")
+	}
+	return nil
+}
+
+func shouldCreateDefaultAdmin(ctx context.Context, pool *db.Pool) (bool, error) {
+	userCount, err := pool.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	return userCount == 0, nil
+}
+
+func createDefaultAdmin(ctx context.Context, pool *db.Pool, cfg *config.Config, logger zerolog.Logger) error {
 	username := auth.NormalizeUsername(cfg.DefaultAdminUser)
 	password := strings.TrimSpace(cfg.DefaultAdminPassword)
 	if username == "" {

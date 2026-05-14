@@ -219,7 +219,21 @@ func (p *Pool) GetStoryDetail(ctx context.Context, storyUUID string) (*StoryDeta
 	if trimmedUUID == "" {
 		return nil, fmt.Errorf("story UUID is required")
 	}
+	header, err := p.getStoryDetailHeader(ctx, trimmedUUID)
+	if err != nil {
+		return nil, err
+	}
+	members, err := p.listStoryDetailArticles(ctx, header)
+	if err != nil {
+		return nil, err
+	}
+	return &StoryDetail{
+		Story:    header,
+		Articles: members,
+	}, nil
+}
 
+func (p *Pool) getStoryDetailHeader(ctx context.Context, storyUUID string) (StoryDetailHeader, error) {
 	const storyQuery = `
 SELECT
 	s.story_id,
@@ -249,7 +263,7 @@ WHERE s.story_uuid = $1::uuid
 `
 
 	var header StoryDetailHeader
-	if err := p.QueryRow(ctx, storyQuery, trimmedUUID).Scan(
+	if err := p.QueryRow(ctx, storyQuery, storyUUID).Scan(
 		&header.StoryID,
 		&header.StoryUUID,
 		&header.CanonicalTitle,
@@ -263,11 +277,14 @@ WHERE s.story_uuid = $1::uuid
 		&header.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, ErrNoRows) {
-			return nil, ErrNoRows
+			return StoryDetailHeader{}, ErrNoRows
 		}
-		return nil, fmt.Errorf("query story detail header: %w", err)
+		return StoryDetailHeader{}, fmt.Errorf("query story detail header: %w", err)
 	}
+	return header, nil
+}
 
+func (p *Pool) listStoryDetailArticles(ctx context.Context, header StoryDetailHeader) ([]StoryDetailArticle, error) {
 	const membersQuery = `
 SELECT
 	a.article_id,
@@ -312,11 +329,7 @@ ORDER BY sa.matched_at DESC, a.article_id DESC
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate story detail members: %w", err)
 	}
-
-	return &StoryDetail{
-		Story:    header,
-		Articles: members,
-	}, nil
+	return members, nil
 }
 
 // ListDigestStories lists stories that were marked as new_story in the provided UTC day window.

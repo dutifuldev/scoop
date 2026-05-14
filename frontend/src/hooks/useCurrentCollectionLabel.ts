@@ -15,4 +15,3 @@ export function useCurrentCollectionLabel(
     return matched?.collection || selectedCollection;
   }, [collections, selectedCollection]);
 }
-

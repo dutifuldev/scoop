@@ -1,5 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { getMe, login as loginRequest, logout as logoutRequest, updateMySettings } from "../api";
 import type { AuthUser, LanguageOption, UserSettings } from "../types";
@@ -86,13 +94,10 @@ export function AuthProvider({ children }: AuthProviderProps): JSX.Element {
     queryClient.clear();
   }, [applyUnauthenticatedState, queryClient]);
 
-  const updateSettings = useCallback(
-    async (payload: Partial<UserSettings>) => {
-      const response = await updateMySettings(payload);
-      setSettings(response.settings);
-    },
-    [],
-  );
+  const updateSettings = useCallback(async (payload: Partial<UserSettings>) => {
+    const response = await updateMySettings(payload);
+    setSettings(response.settings);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

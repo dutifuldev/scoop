@@ -78,93 +78,145 @@ func (s *Service) EmbedPending(ctx context.Context, options EmbedOptions) (Embed
 
 	var result EmbedResult
 	for result.Processed < opts.Limit {
-		remaining := opts.Limit - result.Processed
-		batchSize := min(opts.BatchSize, remaining)
-
-		articles, err := selectPendingEmbeddingArticles(ctx, s.pool, opts.ModelName, opts.ModelVersion, batchSize)
+		progress, err := s.embedNextBatch(ctx, opts, result.Processed)
 		if err != nil {
 			return result, err
 		}
-		if len(articles) == 0 {
+		if progress.Processed == 0 {
 			break
 		}
-
-		texts := make([]string, 0, len(articles))
-		for _, article := range articles {
-			texts = append(texts, embeddingInput(article))
-		}
-
-		vectors, _, err := requestEmbeddings(ctx, opts, texts)
-		if err != nil {
-			return result, err
-		}
-		if len(vectors) != len(articles) {
-			return result, fmt.Errorf("embedding response count mismatch: requested=%d returned=%d", len(articles), len(vectors))
-		}
-
-		for i, article := range articles {
-			result.Processed++
-
-			vectorLiteral, err := toVectorLiteral(vectors[i])
-			if err != nil {
-				result.Failed++
-				return result, fmt.Errorf("article_id=%d invalid embedding vector: %w", article.ArticleID, err)
-			}
-
-			inserted, err := insertArticleEmbedding(
-				ctx,
-				s.pool,
-				article.ArticleID,
-				opts.ModelName,
-				opts.ModelVersion,
-				vectorLiteral,
-				opts.Endpoint,
-				globaltime.UTC(),
-			)
-			if err != nil {
-				result.Failed++
-				return result, err
-			}
-
-			if inserted {
-				result.Embedded++
-			} else {
-				result.Skipped++
-			}
-		}
+		result.add(progress)
 	}
 
 	return result, nil
 }
 
+func (s *Service) embedNextBatch(ctx context.Context, opts EmbedOptions, processed int) (EmbedResult, error) {
+	batchSize := min(opts.BatchSize, opts.Limit-processed)
+	articles, err := selectPendingEmbeddingArticles(ctx, s.pool, opts.ModelName, opts.ModelVersion, batchSize)
+	if err != nil || len(articles) == 0 {
+		return EmbedResult{}, err
+	}
+	vectors, _, err := requestEmbeddings(ctx, opts, embeddingInputs(articles))
+	if err != nil {
+		return EmbedResult{}, err
+	}
+	if len(vectors) != len(articles) {
+		return EmbedResult{}, fmt.Errorf("embedding response count mismatch: requested=%d returned=%d", len(articles), len(vectors))
+	}
+	return s.insertEmbeddingBatch(ctx, opts, articles, vectors)
+}
+
+func embeddingInputs(articles []embeddingPendingArticle) []string {
+	texts := make([]string, len(articles))
+	for index, article := range articles {
+		texts[index] = embeddingInput(article)
+	}
+	return texts
+}
+
+func (s *Service) insertEmbeddingBatch(
+	ctx context.Context,
+	opts EmbedOptions,
+	articles []embeddingPendingArticle,
+	vectors [][]float64,
+) (EmbedResult, error) {
+	var result EmbedResult
+	for i, article := range articles {
+		progress, err := s.insertEmbeddingVector(ctx, opts, article, vectors[i])
+		result.add(progress)
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) insertEmbeddingVector(
+	ctx context.Context,
+	opts EmbedOptions,
+	article embeddingPendingArticle,
+	vector []float64,
+) (EmbedResult, error) {
+	vectorLiteral, err := toVectorLiteral(vector)
+	if err != nil {
+		return EmbedResult{Processed: 1, Failed: 1}, fmt.Errorf("article_id=%d invalid embedding vector: %w", article.ArticleID, err)
+	}
+
+	inserted, err := insertArticleEmbedding(
+		ctx,
+		s.pool,
+		article.ArticleID,
+		opts.ModelName,
+		opts.ModelVersion,
+		vectorLiteral,
+		opts.Endpoint,
+		globaltime.UTC(),
+	)
+	if err != nil {
+		return EmbedResult{Processed: 1, Failed: 1}, err
+	}
+	if inserted {
+		return EmbedResult{Processed: 1, Embedded: 1}, nil
+	}
+	return EmbedResult{Processed: 1, Skipped: 1}, nil
+}
+
+func (r *EmbedResult) add(delta EmbedResult) {
+	r.Processed += delta.Processed
+	r.Embedded += delta.Embedded
+	r.Skipped += delta.Skipped
+	r.Failed += delta.Failed
+}
+
 func normalizeEmbedOptions(opts EmbedOptions) EmbedOptions {
 	normalized := opts
-	if normalized.Limit < 0 {
-		normalized.Limit = 0
-	}
-	if normalized.BatchSize <= 0 {
-		normalized.BatchSize = DefaultEmbeddingBatchSize
-	}
-	if normalized.BatchSize > normalized.Limit && normalized.Limit > 0 {
-		normalized.BatchSize = normalized.Limit
-	}
-	if strings.TrimSpace(normalized.Endpoint) == "" {
-		normalized.Endpoint = DefaultEmbeddingEndpoint
-	}
-	normalized.Endpoint = normalizeEmbeddingEndpoint(normalized.Endpoint)
-	if strings.TrimSpace(normalized.ModelName) == "" {
-		normalized.ModelName = DefaultEmbeddingModelName
-	}
-	if strings.TrimSpace(normalized.ModelVersion) == "" {
-		normalized.ModelVersion = DefaultEmbeddingModelVersion
-	}
-	if normalized.MaxLength <= 0 {
-		normalized.MaxLength = DefaultEmbeddingMaxLength
-	}
-	if normalized.RequestTimeout <= 0 {
-		normalized.RequestTimeout = DefaultEmbeddingRequestTimeout
-	}
+	normalized.Limit = nonNegativeInt(normalized.Limit)
+	normalized.BatchSize = normalizedBatchSize(normalized.BatchSize, normalized.Limit)
+	normalized.Endpoint = normalizeEmbeddingEndpoint(defaultString(normalized.Endpoint, DefaultEmbeddingEndpoint))
+	normalized.ModelName = defaultString(normalized.ModelName, DefaultEmbeddingModelName)
+	normalized.ModelVersion = defaultString(normalized.ModelVersion, DefaultEmbeddingModelVersion)
+	normalized.MaxLength = defaultPositiveInt(normalized.MaxLength, DefaultEmbeddingMaxLength)
+	normalized.RequestTimeout = defaultPositiveDuration(normalized.RequestTimeout, DefaultEmbeddingRequestTimeout)
 	return normalized
+}
+
+func nonNegativeInt(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+func normalizedBatchSize(batchSize int, limit int) int {
+	if batchSize <= 0 {
+		batchSize = DefaultEmbeddingBatchSize
+	}
+	if batchSize > limit && limit > 0 {
+		return limit
+	}
+	return batchSize
+}
+
+func defaultString(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func defaultPositiveInt(value int, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func defaultPositiveDuration(value time.Duration, fallback time.Duration) time.Duration {
+	if value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func selectPendingEmbeddingArticles(
@@ -243,34 +295,21 @@ ON CONFLICT (article_id, model_name, model_version) DO NOTHING
 }
 
 func embeddingInput(article embeddingPendingArticle) string {
-	title := strings.TrimSpace(article.NormalizedTitle)
-	body := strings.TrimSpace(article.NormalizedText)
-	switch {
-	case title == "" && body == "":
-		return ""
-	case body == "":
-		return title
-	case title == "":
-		return body
-	default:
-		return title + "\n\n" + body
+	return strings.Join(nonEmptyEmbeddingParts(article), "\n\n")
+}
+
+func nonEmptyEmbeddingParts(article embeddingPendingArticle) []string {
+	parts := make([]string, 0, 2)
+	for _, part := range []string{article.NormalizedTitle, article.NormalizedText} {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
 	}
+	return parts
 }
 
 func requestEmbeddings(ctx context.Context, opts EmbedOptions, texts []string) ([][]float64, *float64, error) {
-	payload := embedRequest{
-		Texts:     texts,
-		MaxLength: opts.MaxLength,
-	}
-
-	parsedEndpoint, err := url.Parse(opts.Endpoint)
-	if err == nil && strings.HasSuffix(parsedEndpoint.Path, "/v1/embeddings") {
-		payload = embedRequest{
-			Input: texts,
-		}
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(newEmbedRequest(opts, texts))
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
@@ -289,12 +328,27 @@ func requestEmbeddings(ctx context.Context, opts EmbedOptions, texts []string) (
 		return nil, nil, fmt.Errorf("embedding request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	return parseEmbeddingHTTPResponse(resp)
+}
 
+func newEmbedRequest(opts EmbedOptions, texts []string) embedRequest {
+	if isOpenAIEmbeddingEndpoint(opts.Endpoint) {
+		return embedRequest{Input: texts}
+	}
+	return embedRequest{Texts: texts, MaxLength: opts.MaxLength}
+}
+
+func isOpenAIEmbeddingEndpoint(endpoint string) bool {
+	parsedEndpoint, err := url.Parse(endpoint)
+	return err == nil && strings.HasSuffix(parsedEndpoint.Path, "/v1/embeddings")
+}
+
+func parseEmbeddingHTTPResponse(resp *http.Response) ([][]float64, *float64, error) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read embedding response: %w", err)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !isHTTPSuccess(resp.StatusCode) {
 		return nil, nil, fmt.Errorf("embedding service status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
@@ -302,22 +356,34 @@ func requestEmbeddings(ctx context.Context, opts EmbedOptions, texts []string) (
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, nil, fmt.Errorf("decode embedding response: %w", err)
 	}
+	return vectorsFromEmbeddingResponse(parsed)
+}
 
+func isHTTPSuccess(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
+}
+
+func vectorsFromEmbeddingResponse(parsed embedResponse) ([][]float64, *float64, error) {
 	vectors := parsed.Embeddings
 	if len(vectors) == 0 && len(parsed.Data) > 0 {
-		sort.Slice(parsed.Data, func(i, j int) bool {
-			return parsed.Data[i].Index < parsed.Data[j].Index
-		})
-		vectors = make([][]float64, 0, len(parsed.Data))
-		for _, row := range parsed.Data {
-			vectors = append(vectors, row.Embedding)
-		}
+		vectors = vectorsFromOpenAIEmbeddingData(parsed)
 	}
 	if len(vectors) == 0 {
 		return nil, parsed.ElapsedMS, fmt.Errorf("embedding response missing vectors")
 	}
 
 	return vectors, parsed.ElapsedMS, nil
+}
+
+func vectorsFromOpenAIEmbeddingData(parsed embedResponse) [][]float64 {
+	sort.Slice(parsed.Data, func(i, j int) bool {
+		return parsed.Data[i].Index < parsed.Data[j].Index
+	})
+	vectors := make([][]float64, 0, len(parsed.Data))
+	for _, row := range parsed.Data {
+		vectors = append(vectors, row.Embedding)
+	}
+	return vectors
 }
 
 func normalizeEmbeddingEndpoint(raw string) string {

@@ -1,11 +1,10 @@
 package app
 
 import (
+	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"horse.fit/scoop/internal/cli"
@@ -13,95 +12,52 @@ import (
 	"horse.fit/scoop/internal/globaltime"
 )
 
+type articlesListCommandConfig = windowListCommandConfig
+
+type articleValueCommandConfig struct {
+	envLoader   *cli.EnvLoader
+	timeout     time.Duration
+	format      string
+	articleUUID string
+	value       string
+}
+
 func runArticles(args []string) int {
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		switch args[0] {
-		case "list":
-			return runArticlesList(args[1:])
-		case "add-person":
-			return runArticlesAddPerson(args[1:])
-		case "remove-person":
-			return runArticlesRemovePerson(args[1:])
-		case "list-people":
-			return runArticlesListPeople(args[1:])
-		case "help", "--help", "-h":
-			printArticlesUsage()
-			return 0
-		default:
-			fmt.Fprintf(os.Stderr, "unknown articles command: %s\n\n", args[0])
-			printArticlesUsage()
-			return 2
-		}
-	}
-	return runArticlesList(args)
+	return runSubcommands("articles", args, []subcommand{
+		{names: []string{"list"}, run: runArticlesList},
+		{names: []string{"add-person"}, run: runArticlesAddPerson},
+		{names: []string{"remove-person"}, run: runArticlesRemovePerson},
+		{names: []string{"list-people"}, run: runArticlesListPeople},
+	}, printArticlesUsage, runArticlesList)
 }
 
 func runArticlesList(args []string) int {
-	fs := flag.NewFlagSet("articles", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseArticlesListCommand, executeArticlesListCommand)
+}
 
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	collection := fs.String("collection", "", "Filter by collection")
-	from := fs.String("from", defaultUTCDayString(), "Start date in YYYY-MM-DD (UTC)")
-	to := fs.String("to", defaultUTCDayString(), "End date in YYYY-MM-DD (UTC)")
-	limit := fs.Int("limit", 50, "Maximum articles to return")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
+func parseArticlesListCommand(args []string) (articlesListCommandConfig, int, bool) {
+	return parseWindowListCommand(args, "articles", "Maximum articles to return")
+}
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "articles does not accept positional arguments")
-		return 2
-	}
-	if *limit <= 0 {
-		fmt.Fprintln(os.Stderr, "--limit must be > 0")
-		return 2
-	}
+func executeArticlesListCommand(cfg articlesListCommandConfig) int {
+	return runWindowList(cfg, loadArticleList, "Failed to query articles", renderArticlesList)
+}
 
-	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+func loadArticleList(ctx context.Context, pool *db.Pool, cfg windowListCommandConfig) ([]db.ArticleListItem, error) {
+	opts := db.ArticleListOptions{
+		Collection: cfg.collection,
+		From:       cfg.from,
+		To:         cfg.to,
+		Limit:      cfg.limit,
 	}
+	return pool.ListArticles(ctx, opts)
+}
 
-	fromStart, toEnd, err := parseUTCDateRange(*from, *to)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid date range: %v\n", err)
-		return 2
-	}
+func renderArticlesList(articles []db.ArticleListItem, outputFormat string) int {
+	return renderList(articles, outputFormat, writeArticlesListTable)
+}
 
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-
-	articles, err := pool.ListArticles(ctx, db.ArticleListOptions{
-		Collection: normalizeCollectionFlag(*collection),
-		From:       fromStart,
-		To:         toEnd,
-		Limit:      *limit,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query articles: %v\n", err)
-		return 1
-	}
-
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(articles); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-
+func writeArticlesListTable(articles []db.ArticleListItem) error {
 	tableRows := make([][]string, 0, len(articles))
 	for _, article := range articles {
 		tableRows = append(tableRows, []string{
@@ -119,47 +75,29 @@ func runArticlesList(args []string) int {
 		[]string{"article_id", "title", "source", "source_domain", "published_at", "collection", "created_at"},
 		tableRows,
 	); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
-		return 1
+		return err
 	}
-
-	return 0
+	return nil
 }
 
 func runArticlesAddPerson(args []string) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: scoop articles add-person <article_uuid> <identity_ref>")
-		return 2
+	cfg, exitCode, ok := parseArticleValueCommand(
+		args,
+		"articles add-person",
+		"usage: scoop articles add-person <article_uuid> <identity_ref>",
+		true,
+	)
+	if !ok {
+		return exitCode
 	}
-	articleUUID := args[0]
-	identityRef := args[1]
-	fs := flag.NewFlagSet("articles add-person", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	if err := fs.Parse(args[2:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	if _, err := parseOutputFormat(*format, outputFormatTable); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
-	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	defer cancel()
 	defer pool.Close()
-	identity, err := pool.AddArticlePersonIdentity(ctx, articleUUID, identityRef, nil, globaltime.UTC())
+	identity, err := pool.AddArticlePersonIdentity(ctx, cfg.articleUUID, cfg.value, nil, globaltime.UTC())
 	if err != nil {
 		if errors.Is(err, db.ErrNoRows) {
 			fmt.Fprintln(os.Stderr, "Article or person identity not found")
@@ -168,38 +106,27 @@ func runArticlesAddPerson(args []string) int {
 		fmt.Fprintf(os.Stderr, "Failed to add article person identity: %v\n", err)
 		return 1
 	}
-	return printPersonIdentityResult(identity, *format)
+	return printPersonIdentityResult(identity, cfg.format)
 }
 
 func runArticlesRemovePerson(args []string) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: scoop articles remove-person <article_uuid> <identity_ref-or-person_identity_uuid>")
-		return 2
+	cfg, exitCode, ok := parseArticleValueCommand(
+		args,
+		"articles remove-person",
+		"usage: scoop articles remove-person <article_uuid> <identity_ref-or-person_identity_uuid>",
+		false,
+	)
+	if !ok {
+		return exitCode
 	}
-	articleUUID := args[0]
-	identityRefOrUUID := args[1]
-	fs := flag.NewFlagSet("articles remove-person", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	if err := fs.Parse(args[2:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	defer cancel()
 	defer pool.Close()
-	if err := pool.RemoveArticlePersonIdentity(ctx, articleUUID, identityRefOrUUID, nil); err != nil {
+	if err := pool.RemoveArticlePersonIdentity(ctx, cfg.articleUUID, cfg.value, nil); err != nil {
 		if errors.Is(err, db.ErrNoRows) {
 			fmt.Fprintln(os.Stderr, "Article or person identity not found")
 			return 1
@@ -207,49 +134,28 @@ func runArticlesRemovePerson(args []string) int {
 		fmt.Fprintf(os.Stderr, "Failed to remove article person identity: %v\n", err)
 		return 1
 	}
-	fmt.Printf("removed person identity from article %s\n", articleUUID)
+	fmt.Printf("removed person identity from article %s\n", cfg.articleUUID)
 	return 0
 }
 
 func runArticlesListPeople(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: scoop articles list-people <article_uuid>")
-		return 2
+	cfg, exitCode, ok := parseArticleOnlyCommand(args, "articles list-people", "usage: scoop articles list-people <article_uuid>", true)
+	if !ok {
+		return exitCode
 	}
-	articleUUID := args[0]
-	fs := flag.NewFlagSet("articles list-people", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	if err := fs.Parse(args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
-	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	defer cancel()
 	defer pool.Close()
-	identities, err := pool.ListPersonIdentitiesForArticleUUID(ctx, articleUUID)
+	identities, err := pool.ListPersonIdentitiesForArticleUUID(ctx, cfg.articleUUID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to list article person identities: %v\n", err)
 		return 1
 	}
-	if outputFormat == outputFormatJSON {
+	if cfg.format == outputFormatJSON {
 		if err := printJSON(identities); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
 			return 1
@@ -257,6 +163,53 @@ func runArticlesListPeople(args []string) int {
 		return 0
 	}
 	return writePersonIdentityTable(identities)
+}
+
+func parseArticleValueCommand(args []string, name string, usage string, hasFormat bool) (articleValueCommandConfig, int, bool) {
+	return parseArticleCommand(args, name, usage, hasFormat, 2)
+}
+
+func parseArticleOnlyCommand(args []string, name string, usage string, hasFormat bool) (articleValueCommandConfig, int, bool) {
+	return parseArticleCommand(args, name, usage, hasFormat, 1)
+}
+
+func parseArticleCommand(args []string, name string, usage string, hasFormat bool, requiredArgs int) (articleValueCommandConfig, int, bool) {
+	if len(args) < requiredArgs {
+		fmt.Fprintln(os.Stderr, usage)
+		return articleValueCommandConfig{}, 2, false
+	}
+	cfg, exitCode, ok := parseArticleCommandFlags(name, args[requiredArgs:], hasFormat)
+	if !ok {
+		return articleValueCommandConfig{}, exitCode, false
+	}
+	cfg.articleUUID = args[0]
+	if requiredArgs > 1 {
+		cfg.value = args[1]
+	}
+	return cfg, 0, true
+}
+
+func parseArticleCommandFlags(name string, args []string, hasFormat bool) (articleValueCommandConfig, int, bool) {
+	fs := newAppFlagSet(name)
+	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
+	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
+	format := outputFormatTable
+	if hasFormat {
+		fs.StringVar(&format, "format", outputFormatTable, "Output format: table or json")
+	}
+	if exitCode, ok := parseAppFlagSet(fs, args); !ok {
+		return articleValueCommandConfig{}, exitCode, false
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "too many positional arguments")
+		return articleValueCommandConfig{}, 2, false
+	}
+	outputFormat, err := parseOutputFormat(format, outputFormatTable)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
+		return articleValueCommandConfig{}, 2, false
+	}
+	return articleValueCommandConfig{envLoader: envLoader, timeout: *timeout, format: outputFormat}, 0, true
 }
 
 func printArticlesUsage() {

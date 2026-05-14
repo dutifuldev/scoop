@@ -43,6 +43,12 @@ type UpdateTagOptions struct {
 	HighlightColor *string
 }
 
+type tagUpdateMutation struct {
+	currentSlug string
+	updates     map[string]any
+	details     map[string]any
+}
+
 func NormalizeTagSlug(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
 }
@@ -147,67 +153,16 @@ func (p *Pool) CreateTag(ctx context.Context, opts UpsertTagOptions, now time.Ti
 }
 
 func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions, now time.Time) (*TagRecord, error) {
-	normalizedSlug := NormalizeTagSlug(slug)
-	if err := ValidateTagSlug(normalizedSlug); err != nil {
+	mutation, err := buildTagUpdateMutation(slug, opts, now)
+	if err != nil {
 		return nil, err
 	}
 
-	updates := map[string]any{}
-	details := map[string]any{"old_tag": normalizedSlug}
-
-	if opts.NewSlug != nil {
-		newSlug := NormalizeTagSlug(*opts.NewSlug)
-		if err := ValidateTagSlug(newSlug); err != nil {
-			return nil, err
-		}
-		updates["slug"] = newSlug
-		updates["name"] = newSlug
-		details["new_tag"] = newSlug
-	}
-	if opts.Description != nil {
-		description := normalizeOptionalString(opts.Description)
-		updates["description"] = description
-		details["description"] = description
-	}
-	if opts.Color != nil {
-		color, err := normalizeOptionalColor(opts.Color)
-		if err != nil {
-			return nil, err
-		}
-		updates["color"] = color
-		details["color"] = color
-	}
-	if opts.HighlightColor != nil {
-		highlightColor, err := normalizeOptionalColor(opts.HighlightColor)
-		if err != nil {
-			return nil, err
-		}
-		updates["highlight_color"] = highlightColor
-		details["highlight_color"] = highlightColor
-	}
-	if len(updates) == 0 {
-		return nil, fmt.Errorf("at least one update field is required")
-	}
-	updates["updated_at"] = now.UTC()
-
 	var tag Tag
-	err := p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNoRows
-			}
-			return fmt.Errorf("query tag: %w", err)
-		}
-		if err := tx.Model(&tag).Updates(updates).Error; err != nil {
-			return fmt.Errorf("update tag: %w", err)
-		}
-		if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
-			return fmt.Errorf("query updated tag: %w", err)
-		}
-		if err := insertAuditEventGORM(ctx, tx, nil, "tag.update", "tag", tag.Slug, details); err != nil {
-			return err
-		}
-		return nil
+	err = p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		tag, err = updateTagGORM(ctx, tx, mutation)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -216,52 +171,156 @@ func (p *Pool) UpdateTag(ctx context.Context, slug string, opts UpdateTagOptions
 	return &record, nil
 }
 
+func updateTagGORM(ctx context.Context, tx *gorm.DB, mutation tagUpdateMutation) (Tag, error) {
+	tag, err := lookupTagForUpdateGORM(tx, mutation.currentSlug)
+	if err != nil {
+		return Tag{}, err
+	}
+	if err := tx.Model(&tag).Updates(mutation.updates).Error; err != nil {
+		return Tag{}, fmt.Errorf("update tag: %w", err)
+	}
+	if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
+		return Tag{}, fmt.Errorf("query updated tag: %w", err)
+	}
+	if err := insertAuditEventGORM(ctx, tx, nil, "tag.update", "tag", tag.Slug, mutation.details); err != nil {
+		return Tag{}, err
+	}
+	return tag, nil
+}
+
+func lookupTagForUpdateGORM(tx *gorm.DB, slug string) (Tag, error) {
+	var tag Tag
+	if err := tx.Where("slug = ?", slug).First(&tag).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Tag{}, ErrNoRows
+		}
+		return Tag{}, fmt.Errorf("query tag: %w", err)
+	}
+	return tag, nil
+}
+
+func buildTagUpdateMutation(slug string, opts UpdateTagOptions, now time.Time) (tagUpdateMutation, error) {
+	normalizedSlug := NormalizeTagSlug(slug)
+	if err := ValidateTagSlug(normalizedSlug); err != nil {
+		return tagUpdateMutation{}, err
+	}
+	mutation := tagUpdateMutation{
+		currentSlug: normalizedSlug,
+		updates:     map[string]any{},
+		details:     map[string]any{"old_tag": normalizedSlug},
+	}
+	if err := applyTagSlugUpdate(&mutation, opts.NewSlug); err != nil {
+		return tagUpdateMutation{}, err
+	}
+	if err := applyTagDescriptionUpdate(&mutation, opts.Description); err != nil {
+		return tagUpdateMutation{}, err
+	}
+	if err := applyTagColorUpdate(&mutation, "color", opts.Color); err != nil {
+		return tagUpdateMutation{}, err
+	}
+	if err := applyTagColorUpdate(&mutation, "highlight_color", opts.HighlightColor); err != nil {
+		return tagUpdateMutation{}, err
+	}
+	if len(mutation.updates) == 0 {
+		return tagUpdateMutation{}, fmt.Errorf("at least one update field is required")
+	}
+	mutation.updates["updated_at"] = now.UTC()
+	return mutation, nil
+}
+
+func applyTagSlugUpdate(mutation *tagUpdateMutation, raw *string) error {
+	if raw == nil {
+		return nil
+	}
+	newSlug := NormalizeTagSlug(*raw)
+	if err := ValidateTagSlug(newSlug); err != nil {
+		return err
+	}
+	mutation.updates["slug"] = newSlug
+	mutation.updates["name"] = newSlug
+	mutation.details["new_tag"] = newSlug
+	return nil
+}
+
+func applyTagDescriptionUpdate(mutation *tagUpdateMutation, raw *string) error {
+	if raw == nil {
+		return nil
+	}
+	description := normalizeOptionalString(raw)
+	mutation.updates["description"] = description
+	mutation.details["description"] = description
+	return nil
+}
+
+func applyTagColorUpdate(mutation *tagUpdateMutation, field string, raw *string) error {
+	if raw == nil {
+		return nil
+	}
+	color, err := normalizeOptionalColor(raw)
+	if err != nil {
+		return err
+	}
+	mutation.updates[field] = color
+	mutation.details[field] = color
+	return nil
+}
+
 func (p *Pool) SetTagArchived(ctx context.Context, slug string, archived bool, now time.Time) (*TagRecord, error) {
 	normalizedSlug := NormalizeTagSlug(slug)
 	if err := ValidateTagSlug(normalizedSlug); err != nil {
 		return nil, err
 	}
 
-	action := "tag.unarchive"
-	if archived {
-		action = "tag.archive"
-	}
-
 	var tag Tag
 	err := p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNoRows
-			}
-			return fmt.Errorf("query tag: %w", err)
-		}
-		var archivedAt *time.Time
-		if archived {
-			value := now.UTC()
-			archivedAt = &value
-		}
-		if err := tx.Model(&tag).Updates(map[string]any{
-			"archived_at": archivedAt,
-			"updated_at":  now.UTC(),
-		}).Error; err != nil {
-			return fmt.Errorf("archive tag: %w", err)
-		}
-		if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
-			return fmt.Errorf("query archived tag: %w", err)
-		}
-		if err := insertAuditEventGORM(ctx, tx, nil, action, "tag", tag.Slug, map[string]any{
-			"tag":      tag.Slug,
-			"archived": archived,
-		}); err != nil {
-			return err
-		}
-		return nil
+		var err error
+		tag, err = setTagArchivedTx(ctx, tx, normalizedSlug, archived, now)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	record := tagModelToRecord(tag)
 	return &record, nil
+}
+
+func setTagArchivedTx(ctx context.Context, tx *gorm.DB, normalizedSlug string, archived bool, now time.Time) (Tag, error) {
+	tag, err := lookupTagBySlugGORM(ctx, tx, normalizedSlug, false)
+	if err != nil {
+		return Tag{}, err
+	}
+	if err := tx.Model(&tag).Updates(tagArchiveUpdates(archived, now)).Error; err != nil {
+		return Tag{}, fmt.Errorf("archive tag: %w", err)
+	}
+	if err := tx.Where("tag_id = ?", tag.TagID).First(&tag).Error; err != nil {
+		return Tag{}, fmt.Errorf("query archived tag: %w", err)
+	}
+	if err := insertAuditEventGORM(ctx, tx, nil, tagArchiveAction(archived), "tag", tag.Slug, map[string]any{
+		"tag":      tag.Slug,
+		"archived": archived,
+	}); err != nil {
+		return Tag{}, err
+	}
+	return tag, nil
+}
+
+func tagArchiveUpdates(archived bool, now time.Time) map[string]any {
+	var archivedAt *time.Time
+	if archived {
+		value := now.UTC()
+		archivedAt = &value
+	}
+	return map[string]any{
+		"archived_at": archivedAt,
+		"updated_at":  now.UTC(),
+	}
+}
+
+func tagArchiveAction(archived bool) string {
+	if archived {
+		return "tag.archive"
+	}
+	return "tag.unarchive"
 }
 
 func (p *Pool) DeleteTag(ctx context.Context, slug string) error {
@@ -271,29 +330,38 @@ func (p *Pool) DeleteTag(ctx context.Context, slug string) error {
 	}
 
 	return p.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tag Tag
-		if err := tx.Where("slug = ?", normalizedSlug).First(&tag).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNoRows
-			}
-			return fmt.Errorf("query tag: %w", err)
-		}
-		var usageCount int64
-		if err := tx.Model(&ArticleTag{}).Where("tag_id = ?", tag.TagID).Count(&usageCount).Error; err != nil {
-			return fmt.Errorf("count tag usage: %w", err)
-		}
-		if usageCount > 0 {
-			return fmt.Errorf("tag %q is attached to %d articles; archive it instead", normalizedSlug, usageCount)
-		}
-		if err := tx.Delete(&tag).Error; err != nil {
-			return fmt.Errorf("delete tag: %w", err)
-		}
-		if err := insertAuditEventGORM(ctx, tx, nil, "tag.delete", "tag", normalizedSlug, map[string]any{
-			"tag": normalizedSlug,
-		}); err != nil {
+		tag, err := lookupDeletableTagGORM(tx, normalizedSlug)
+		if err != nil {
 			return err
 		}
-		return nil
+		return deleteTagGORM(ctx, tx, tag)
+	})
+}
+
+func lookupDeletableTagGORM(tx *gorm.DB, slug string) (Tag, error) {
+	var tag Tag
+	if err := tx.Where("slug = ?", slug).First(&tag).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Tag{}, ErrNoRows
+		}
+		return Tag{}, fmt.Errorf("query tag: %w", err)
+	}
+	var usageCount int64
+	if err := tx.Model(&ArticleTag{}).Where("tag_id = ?", tag.TagID).Count(&usageCount).Error; err != nil {
+		return Tag{}, fmt.Errorf("count tag usage: %w", err)
+	}
+	if usageCount > 0 {
+		return Tag{}, fmt.Errorf("tag %q is attached to %d articles; archive it instead", slug, usageCount)
+	}
+	return tag, nil
+}
+
+func deleteTagGORM(ctx context.Context, tx *gorm.DB, tag Tag) error {
+	if err := tx.Delete(&tag).Error; err != nil {
+		return fmt.Errorf("delete tag: %w", err)
+	}
+	return insertAuditEventGORM(ctx, tx, nil, "tag.delete", "tag", tag.Slug, map[string]any{
+		"tag": tag.Slug,
 	})
 }
 
@@ -369,52 +437,42 @@ func (p *Pool) RemoveArticleTag(ctx context.Context, articleUUID string, slug st
 }
 
 func (p *Pool) ListTagsForArticleUUIDs(ctx context.Context, articleUUIDs []string) (map[string][]TagRecord, error) {
-	articleUUIDs = uniqueTrimmedStrings(articleUUIDs)
-	if len(articleUUIDs) == 0 {
-		return map[string][]TagRecord{}, nil
+	selectClause := "a.article_uuid::text AS article_uuid, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at"
+	joins := []string{
+		"JOIN news.article_tags AS at ON at.article_id = a.article_id",
+		"JOIN news.tags AS t ON t.tag_id = at.tag_id",
 	}
-	var rows []articleTagRow
-	uuidCondition, uuidArgs := uuidInCondition("a.article_uuid", articleUUIDs)
-	if err := p.gdb.WithContext(ctx).
-		Table("news.articles AS a").
-		Select("a.article_uuid::text AS article_uuid, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at").
-		Joins("JOIN news.article_tags AS at ON at.article_id = a.article_id").
-		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
-		Where(uuidCondition, uuidArgs...).
-		Where("a.deleted_at IS NULL").
-		Order("t.slug").
-		Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("query article tags: %w", err)
-	}
-	result := make(map[string][]TagRecord)
-	for _, row := range rows {
-		result[row.ArticleUUID] = append(result[row.ArticleUUID], row.tagRecord())
-	}
-	return result, nil
+	return listArticleRelatedRecords(
+		ctx,
+		p.gdb,
+		articleUUIDs,
+		selectClause,
+		joins,
+		"t.slug",
+		"query article tags",
+		func(row articleTagRow) string { return row.ArticleUUID },
+		func(row articleTagRow) TagRecord { return row.tagRecord() },
+	)
 }
 
 func (p *Pool) ListTagsForStoryIDs(ctx context.Context, storyIDs []int64) (map[int64][]TagRecord, error) {
-	storyIDs = uniquePositiveInt64s(storyIDs)
-	if len(storyIDs) == 0 {
-		return map[int64][]TagRecord{}, nil
+	selectClause := "sm.story_id, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at"
+	joins := []string{
+		"JOIN news.articles AS a ON a.article_id = sm.article_id AND a.deleted_at IS NULL",
+		"JOIN news.article_tags AS at ON at.article_id = sm.article_id",
+		"JOIN news.tags AS t ON t.tag_id = at.tag_id",
 	}
-	var rows []storyTagRow
-	if err := p.gdb.WithContext(ctx).
-		Table("news.story_articles AS sm").
-		Distinct("sm.story_id, t.tag_id, t.tag_uuid::text AS tag_uuid, t.slug, t.name, t.description, t.color, t.highlight_color, t.archived_at, t.created_at, t.updated_at").
-		Joins("JOIN news.articles AS a ON a.article_id = sm.article_id AND a.deleted_at IS NULL").
-		Joins("JOIN news.article_tags AS at ON at.article_id = sm.article_id").
-		Joins("JOIN news.tags AS t ON t.tag_id = at.tag_id").
-		Where("sm.story_id IN ?", storyIDs).
-		Order("sm.story_id, t.slug").
-		Scan(&rows).Error; err != nil {
-		return nil, fmt.Errorf("query story tags: %w", err)
-	}
-	result := make(map[int64][]TagRecord, len(storyIDs))
-	for _, row := range rows {
-		result[row.StoryID] = append(result[row.StoryID], row.tagRecord())
-	}
-	return result, nil
+	return listStoryRelatedRecords(
+		ctx,
+		p.gdb,
+		storyIDs,
+		selectClause,
+		joins,
+		"sm.story_id, t.slug",
+		"query story tags",
+		func(row storyTagRow) int64 { return row.StoryID },
+		func(row storyTagRow) TagRecord { return row.tagRecord() },
+	)
 }
 
 func lookupArticleByUUIDGORM(ctx context.Context, tx *gorm.DB, articleUUID string) (Article, error) {
@@ -466,36 +524,24 @@ func insertAuditEventGORM(ctx context.Context, tx *gorm.DB, actorUserID *int64, 
 }
 
 type articleTagRow struct {
-	ArticleUUID    string
-	TagID          int64
-	TagUUID        string
-	Slug           string
-	Name           string
-	Description    *string
-	Color          *string
-	HighlightColor *string
-	ArchivedAt     *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ArticleUUID  string
+	TagRowFields `gorm:"embedded"`
 }
 
 func (r articleTagRow) tagRecord() TagRecord {
-	return tagModelToRecord(Tag{
-		TagID:          r.TagID,
-		TagUUID:        r.TagUUID,
-		Slug:           r.Slug,
-		Name:           r.Name,
-		Description:    r.Description,
-		Color:          r.Color,
-		HighlightColor: r.HighlightColor,
-		ArchivedAt:     r.ArchivedAt,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-	})
+	return r.TagRowFields.tagRecord()
 }
 
 type storyTagRow struct {
-	StoryID        int64
+	StoryID      int64
+	TagRowFields `gorm:"embedded"`
+}
+
+func (r storyTagRow) tagRecord() TagRecord {
+	return r.TagRowFields.tagRecord()
+}
+
+type TagRowFields struct {
 	TagID          int64
 	TagUUID        string
 	Slug           string
@@ -508,19 +554,8 @@ type storyTagRow struct {
 	UpdatedAt      time.Time
 }
 
-func (r storyTagRow) tagRecord() TagRecord {
-	return tagModelToRecord(Tag{
-		TagID:          r.TagID,
-		TagUUID:        r.TagUUID,
-		Slug:           r.Slug,
-		Name:           r.Name,
-		Description:    r.Description,
-		Color:          r.Color,
-		HighlightColor: r.HighlightColor,
-		ArchivedAt:     r.ArchivedAt,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-	})
+func (r TagRowFields) tagRecord() TagRecord {
+	return tagModelToRecord(Tag(r))
 }
 
 func tagModelToRecord(tag Tag) TagRecord {

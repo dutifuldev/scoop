@@ -40,76 +40,102 @@ func FetchTextWithOptions(ctx context.Context, canonicalURL string, title string
 		return "", fmt.Errorf("canonical URL is required")
 	}
 
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = DefaultFetchTimeout
-	}
+	opts = normalizeFetchOptions(opts)
 
-	bodyLimit := opts.BodyByteLimit
-	if bodyLimit <= 0 {
-		bodyLimit = DefaultBodyByteLimit
-	}
-
-	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, page, nil)
+	resp, err := fetchPage(fetchCtx, page, opts)
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
-	}
-
-	userAgent := strings.TrimSpace(opts.UserAgent)
-	if userAgent == "" {
-		userAgent = defaultUserAgent
-	}
-
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.8")
-
-	client := opts.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: timeout}
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch url: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !isSuccessStatus(resp.StatusCode) {
 		return "", fmt.Errorf("fetch status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, opts.BodyByteLimit))
 	if err != nil {
 		return "", fmt.Errorf("read body: %w", err)
 	}
 
-	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
-	if strings.HasPrefix(contentType, "text/plain") {
+	return extractFetchedText(page, title, resp.Header.Get("Content-Type"), body)
+}
+
+func normalizeFetchOptions(opts FetchOptions) FetchOptions {
+	if opts.Timeout <= 0 {
+		opts.Timeout = DefaultFetchTimeout
+	}
+	if opts.BodyByteLimit <= 0 {
+		opts.BodyByteLimit = DefaultBodyByteLimit
+	}
+	if strings.TrimSpace(opts.UserAgent) == "" {
+		opts.UserAgent = defaultUserAgent
+	}
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: opts.Timeout}
+	}
+	return opts
+}
+
+func fetchPage(ctx context.Context, page string, opts FetchOptions) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, page, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", strings.TrimSpace(opts.UserAgent))
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.8")
+
+	resp, err := opts.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch url: %w", err)
+	}
+	return resp, nil
+}
+
+func isSuccessStatus(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
+}
+
+func extractFetchedText(page string, title string, contentType string, body []byte) (string, error) {
+	if isPlainText(contentType) {
 		return CleanText(string(body)), nil
 	}
 
+	text, excerpt, err := parseReadableHTML(page, body)
+	if err != nil {
+		return "", err
+	}
+	return bestExtractedText(text, excerpt, title)
+}
+
+func isPlainText(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/plain")
+}
+
+func parseReadableHTML(page string, body []byte) (string, string, error) {
 	pageURL, err := url.Parse(page)
 	if err != nil {
-		return "", fmt.Errorf("parse page url: %w", err)
+		return "", "", fmt.Errorf("parse page url: %w", err)
 	}
-
 	article, err := readability.FromReader(bytes.NewReader(body), pageURL)
 	if err != nil {
-		return "", fmt.Errorf("readability parse: %w", err)
+		return "", "", fmt.Errorf("readability parse: %w", err)
 	}
 
 	var renderedText bytes.Buffer
 	if err := article.RenderText(&renderedText); err != nil {
-		return "", fmt.Errorf("render readability text: %w", err)
+		return "", "", fmt.Errorf("render readability text: %w", err)
 	}
+	return CleanText(renderedText.String()), CleanText(article.Excerpt()), nil
+}
 
-	text := CleanText(renderedText.String())
+func bestExtractedText(text string, excerpt string, title string) (string, error) {
 	if text == "" {
-		text = CleanText(article.Excerpt())
+		text = excerpt
 	}
 	if text == "" {
 		text = strings.TrimSpace(title)

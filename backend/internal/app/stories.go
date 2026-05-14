@@ -1,87 +1,33 @@
 package app
 
 import (
-	"errors"
-	"flag"
+	"context"
 	"fmt"
-	"os"
-	"time"
 
-	"horse.fit/scoop/internal/cli"
 	"horse.fit/scoop/internal/db"
 )
 
+type storiesCommandConfig = windowListCommandConfig
+
 func runStories(args []string) int {
-	fs := flag.NewFlagSet("stories", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseStoriesCommand, executeStoriesCommand)
+}
 
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	collection := fs.String("collection", "", "Filter by collection")
-	from := fs.String("from", defaultUTCDayString(), "Start date in YYYY-MM-DD (UTC)")
-	to := fs.String("to", defaultUTCDayString(), "End date in YYYY-MM-DD (UTC)")
-	limit := fs.Int("limit", 50, "Maximum stories to return")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
+func parseStoriesCommand(args []string) (storiesCommandConfig, int, bool) {
+	return parseWindowListCommand(args, "stories", "Maximum stories to return")
+}
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "stories does not accept positional arguments")
-		return 2
-	}
-	if *limit <= 0 {
-		fmt.Fprintln(os.Stderr, "--limit must be > 0")
-		return 2
-	}
+func executeStoriesCommand(cfg storiesCommandConfig) int {
+	return runWindowList(cfg, loadStorySummaries, "Failed to query stories", renderStorySummaries)
+}
 
-	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
-	}
-
-	fromStart, toEnd, err := parseUTCDateRange(*from, *to)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid date range: %v\n", err)
-		return 2
-	}
-
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-
-	stories, err := pool.ListStoriesByDedupEventWindow(ctx, db.StoryEventListOptions{
-		Collection: normalizeCollectionFlag(*collection),
-		From:       fromStart,
-		To:         toEnd,
-		Limit:      *limit,
+func loadStorySummaries(ctx context.Context, pool *db.Pool, cfg windowListCommandConfig) ([]db.StorySummary, error) {
+	return pool.ListStoriesByDedupEventWindow(ctx, db.StoryEventListOptions{
+		Collection: cfg.collection,
+		From:       cfg.from,
+		To:         cfg.to,
+		Limit:      cfg.limit,
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query stories: %v\n", err)
-		return 1
-	}
-
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(stories); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-
-	if err := writeStorySummaryTable(stories); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render table: %v\n", err)
-		return 1
-	}
-	return 0
 }
 
 func writeStorySummaryTable(items []db.StorySummary) error {

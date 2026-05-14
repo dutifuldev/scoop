@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +11,35 @@ import (
 type rootCommand struct {
 	names []string
 	run   func([]string) int
+}
+
+type subcommand struct {
+	names []string
+	run   func([]string) int
+}
+
+func runParsedCommand[T any](args []string, parse func([]string) (T, int, bool), execute func(T) int) int {
+	cfg, exitCode, ok := parse(args)
+	if !ok {
+		return exitCode
+	}
+	return execute(cfg)
+}
+
+func newAppFlagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	return fs
+}
+
+func parseAppFlagSet(fs *flag.FlagSet, args []string) (int, bool) {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0, false
+		}
+		return 2, false
+	}
+	return 0, true
 }
 
 var rootCommands = []rootCommand{
@@ -63,26 +94,68 @@ func normalizeCommandName(raw string) string {
 }
 
 func isHelpCommand(name string) bool {
-	switch name {
-	case "help", "--help", "-h":
-		return true
-	default:
-		return false
-	}
+	return stringSliceContains([]string{"help", "--help", "-h"}, name)
 }
 
 func findRootCommand(name string) (rootCommand, bool) {
 	for _, command := range rootCommands {
-		if command.matches(name) {
+		if stringSliceContains(command.names, name) {
 			return command, true
 		}
 	}
 	return rootCommand{}, false
 }
 
-func (c rootCommand) matches(name string) bool {
-	for _, candidate := range c.names {
-		if candidate == name {
+func runSubcommands(commandName string, args []string, commands []subcommand, usage func(), defaultRun func([]string) int) int {
+	if len(args) == 0 {
+		return runDefaultSubcommand(args, usage, defaultRun)
+	}
+
+	name := normalizeCommandName(args[0])
+	if strings.HasPrefix(args[0], "-") {
+		return runFlagDefaultSubcommand(args, commandName, usage, defaultRun)
+	}
+	if isHelpCommand(name) {
+		usage()
+		return 0
+	}
+	if command, ok := findSubcommand(commands, name); ok {
+		return command.run(args[1:])
+	}
+	fmt.Fprintf(os.Stderr, "unknown %s command: %s\n\n", commandName, args[0])
+	usage()
+	return 2
+}
+
+func runDefaultSubcommand(args []string, usage func(), defaultRun func([]string) int) int {
+	if defaultRun != nil {
+		return defaultRun(args)
+	}
+	usage()
+	return 2
+}
+
+func runFlagDefaultSubcommand(args []string, commandName string, usage func(), defaultRun func([]string) int) int {
+	if defaultRun != nil {
+		return defaultRun(args)
+	}
+	fmt.Fprintf(os.Stderr, "%s requires a subcommand\n\n", commandName)
+	usage()
+	return 2
+}
+
+func findSubcommand(commands []subcommand, name string) (subcommand, bool) {
+	for _, command := range commands {
+		if stringSliceContains(command.names, name) {
+			return command, true
+		}
+	}
+	return subcommand{}, false
+}
+
+func stringSliceContains(candidates []string, value string) bool {
+	for _, candidate := range candidates {
+		if candidate == value {
 			return true
 		}
 	}

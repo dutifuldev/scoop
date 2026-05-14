@@ -52,12 +52,16 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64.8
+          version: v2.11.0
           working-directory: backend
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
 
       - name: Build
         working-directory: backend
-        run: go build ./...
+        run: go build ./cmd/scoop
 
       - name: Test
         working-directory: backend
@@ -70,6 +74,25 @@ jobs:
         env:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
         run: ./scripts/check-go-coverage.sh
+
+      - name: Slophammer static check
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check .
+
+      - name: Slophammer DRY gate
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go dry .
+
+      - name: Slophammer CRAP gate
+        env:
+          DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go crap .
+
+      - name: Slophammer mutation gate
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go mutate . --scan
+
+      - name: Slophammer executable check
+        env:
+          DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check . --execute
 
   frontend:
     name: Frontend (TypeScript)
@@ -105,3 +128,31 @@ jobs:
       - name: Build
         working-directory: frontend
         run: pnpm run build
+
+  embedding-service:
+    name: Embedding Service (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: embedding-service/.python-version
+
+      - name: Lint
+        working-directory: embedding-service
+        run: uv run --no-project --with ruff ruff check .
+
+      - name: Typecheck
+        working-directory: embedding-service
+        run: uv run --no-project --with mypy mypy main.py
+
+      - name: Test
+        working-directory: embedding-service
+        run: uv run --no-project --with pytest pytest

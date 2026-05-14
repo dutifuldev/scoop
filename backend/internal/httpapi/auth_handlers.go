@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,11 +21,18 @@ const (
 	defaultSessionTouchInterval = time.Minute
 )
 
+var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 type authPrincipal struct {
 	SessionID string
 	UserID    int64
 	Username  string
 	ExpiresAt time.Time
+}
+
+type authCheckResult struct {
+	principal authPrincipal
+	err       error
 }
 
 type authUserResponse struct {
@@ -37,6 +45,16 @@ type authUserResponse struct {
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type loginContext struct {
+	username  string
+	password  string
+	user      *db.AuthUser
+	settings  *db.UserSettingsRecord
+	now       time.Time
+	expiresAt time.Time
+	sessionID string
 }
 
 type authStore interface {
@@ -69,50 +87,66 @@ func (s *Server) authDataStore() authStore {
 func (s *Server) requireAuth() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if c == nil {
-				return unauthorizedResponse(c)
+			result := s.checkAuth(c)
+			if result.err != nil {
+				return result.err
 			}
-			store := s.authDataStore()
-			if store == nil {
-				return internalError(c, "Failed to authorize request")
-			}
-
-			sessionID, found := s.sessionIDFromCookie(c)
-			if !found {
-				return unauthorizedResponse(c)
-			}
-
-			session, err := store.GetSession(c.Request().Context(), sessionID)
-			if err != nil {
-				if errors.Is(err, db.ErrNoRows) {
-					s.clearSessionCookie(c)
-					return unauthorizedResponse(c)
-				}
-				s.logger.Error().Err(err).Msg("session lookup failed")
-				return internalError(c, "Failed to authorize request")
-			}
-
-			now := globaltime.UTC()
-			if !session.ExpiresAt.After(now) {
-				_ = store.DeleteSession(c.Request().Context(), session.SessionID)
-				s.clearSessionCookie(c)
-				return unauthorizedResponse(c)
-			}
-
-			if now.Sub(session.LastSeenAt) >= defaultSessionTouchInterval {
-				_ = store.TouchSession(c.Request().Context(), session.SessionID, now)
-			}
-
-			c.Set("auth.principal", authPrincipal{
-				SessionID: session.SessionID,
-				UserID:    session.UserID,
-				Username:  session.Username,
-				ExpiresAt: session.ExpiresAt.UTC(),
-			})
-
+			c.Set("auth.principal", result.principal)
 			return next(c)
 		}
 	}
+}
+
+func (s *Server) checkAuth(c echo.Context) authCheckResult {
+	if c == nil {
+		return authCheckResult{err: unauthorizedResponse(c)}
+	}
+	store := s.authDataStore()
+	if store == nil {
+		return authCheckResult{err: internalError(c, "Failed to authorize request")}
+	}
+
+	sessionID, found := s.sessionIDFromCookie(c)
+	if !found {
+		return authCheckResult{err: unauthorizedResponse(c)}
+	}
+
+	session, err := s.loadAuthSession(c, store, sessionID)
+	if err != nil {
+		return authCheckResult{err: err}
+	}
+	return s.validateAuthSession(c, store, session)
+}
+
+func (s *Server) loadAuthSession(c echo.Context, store authStore, sessionID string) (*db.AuthSession, error) {
+	session, err := store.GetSession(c.Request().Context(), sessionID)
+	if err == nil {
+		return session, nil
+	}
+	if errors.Is(err, db.ErrNoRows) {
+		s.clearSessionCookie(c)
+		return nil, unauthorizedResponse(c)
+	}
+	s.logger.Error().Err(err).Msg("session lookup failed")
+	return nil, internalError(c, "Failed to authorize request")
+}
+
+func (s *Server) validateAuthSession(c echo.Context, store authStore, session *db.AuthSession) authCheckResult {
+	now := globaltime.UTC()
+	if !session.ExpiresAt.After(now) {
+		_ = store.DeleteSession(c.Request().Context(), session.SessionID)
+		s.clearSessionCookie(c)
+		return authCheckResult{err: unauthorizedResponse(c)}
+	}
+	if now.Sub(session.LastSeenAt) >= defaultSessionTouchInterval {
+		_ = store.TouchSession(c.Request().Context(), session.SessionID, now)
+	}
+	return authCheckResult{principal: authPrincipal{
+		SessionID: session.SessionID,
+		UserID:    session.UserID,
+		Username:  session.Username,
+		ExpiresAt: session.ExpiresAt.UTC(),
+	}}
 }
 
 func (s *Server) handleLogin(c echo.Context) error {
@@ -121,62 +155,105 @@ func (s *Server) handleLogin(c echo.Context) error {
 		return internalError(c, "Failed to process login")
 	}
 
+	login, ok := s.prepareLogin(c, store)
+	if !ok {
+		return nil
+	}
+	s.setSessionCookie(c, login.sessionID, login.expiresAt)
+	return s.loginSuccess(c, login)
+}
+
+func (s *Server) prepareLogin(c echo.Context, store authStore) (loginContext, bool) {
+	login, ok := decodeLoginContext(c)
+	if !ok {
+		return loginContext{}, false
+	}
+	if ok := s.loadLoginUserAndSettings(c, store, &login); !ok {
+		return loginContext{}, false
+	}
+	if isPasswordEnabled(login.settings) && !auth.VerifyPassword(login.password, login.user.PasswordHash) {
+		_ = fail(c, http.StatusUnauthorized, "Invalid username or password", nil)
+		return loginContext{}, false
+	}
+	if ok := s.createLoginSession(c, store, &login); !ok {
+		return loginContext{}, false
+	}
+	s.updateLoginLastSeen(c, store, &login)
+	return login, true
+}
+
+func decodeLoginContext(c echo.Context) (loginContext, bool) {
 	var req loginRequest
 	if err := decodeJSONBody(c, &req); err != nil {
-		return failValidation(c, map[string]string{"body": err.Error()})
+		_ = failValidation(c, map[string]string{"body": err.Error()})
+		return loginContext{}, false
 	}
-
-	username := auth.NormalizeUsername(req.Username)
-	password := strings.TrimSpace(req.Password)
-	if username == "" {
-		return failValidation(c, map[string]string{"username": "is required"})
+	login := loginContext{
+		username: auth.NormalizeUsername(req.Username),
+		password: strings.TrimSpace(req.Password),
 	}
+	if login.username == "" {
+		_ = failValidation(c, map[string]string{"username": "is required"})
+		return loginContext{}, false
+	}
+	return login, true
+}
 
-	user, err := store.GetUserByUsername(c.Request().Context(), username)
+func (s *Server) loadLoginUserAndSettings(c echo.Context, store authStore, login *loginContext) bool {
+	user, err := store.GetUserByUsername(c.Request().Context(), login.username)
 	if err != nil {
 		if errors.Is(err, db.ErrNoRows) {
-			return fail(c, http.StatusUnauthorized, "Invalid username or password", nil)
+			_ = fail(c, http.StatusUnauthorized, "Invalid username or password", nil)
+			return false
 		}
-		s.logger.Error().Err(err).Str("username", username).Msg("login lookup failed")
-		return internalError(c, "Failed to process login")
+		s.logger.Error().Err(err).Str("username", login.username).Msg("login lookup failed")
+		_ = internalError(c, "Failed to process login")
+		return false
 	}
-
 	settings, err := store.EnsureUserSettings(c.Request().Context(), user.UserID)
 	if err != nil {
 		s.logger.Error().Err(err).Int64("user_id", user.UserID).Msg("ensure settings failed")
-		return internalError(c, "Failed to load settings")
+		_ = internalError(c, "Failed to load settings")
+		return false
 	}
+	login.user = user
+	login.settings = settings
+	return true
+}
 
-	if isPasswordEnabled(settings) && !auth.VerifyPassword(password, user.PasswordHash) {
-		return fail(c, http.StatusUnauthorized, "Invalid username or password", nil)
-	}
-
-	now := globaltime.UTC()
-	if _, cleanupErr := store.DeleteExpiredSessions(c.Request().Context(), now); cleanupErr != nil {
+func (s *Server) createLoginSession(c echo.Context, store authStore, login *loginContext) bool {
+	login.now = globaltime.UTC()
+	if _, cleanupErr := store.DeleteExpiredSessions(c.Request().Context(), login.now); cleanupErr != nil {
 		s.logger.Warn().Err(cleanupErr).Msg("delete expired sessions failed")
 	}
 
-	expiresAt := s.sessionExpiry(now)
-	sessionID, err := store.CreateSession(c.Request().Context(), user.UserID, expiresAt, now)
+	login.expiresAt = s.sessionExpiry(login.now)
+	sessionID, err := store.CreateSession(c.Request().Context(), login.user.UserID, login.expiresAt, login.now)
 	if err != nil {
-		s.logger.Error().Err(err).Int64("user_id", user.UserID).Msg("create session failed")
-		return internalError(c, "Failed to process login")
+		s.logger.Error().Err(err).Int64("user_id", login.user.UserID).Msg("create session failed")
+		_ = internalError(c, "Failed to process login")
+		return false
 	}
+	login.sessionID = sessionID
+	return true
+}
 
-	if err := store.SetUserLastLogin(c.Request().Context(), user.UserID, now); err != nil {
-		s.logger.Error().Err(err).Int64("user_id", user.UserID).Msg("update last login failed")
+func (s *Server) updateLoginLastSeen(c echo.Context, store authStore, login *loginContext) {
+	if err := store.SetUserLastLogin(c.Request().Context(), login.user.UserID, login.now); err != nil {
+		s.logger.Error().Err(err).Int64("user_id", login.user.UserID).Msg("update last login failed")
 	}
-	nowCopy := now
-	user.LastLoginAt = &nowCopy
+	nowCopy := login.now
+	login.user.LastLoginAt = &nowCopy
+}
 
-	s.setSessionCookie(c, sessionID, expiresAt)
+func (s *Server) loginSuccess(c echo.Context, login loginContext) error {
 	return success(c, map[string]any{
-		"user":      buildAuthUserResponse(user),
-		"settings":  buildSettingsResponse(settings),
+		"user":      buildAuthUserResponse(login.user),
+		"settings":  buildSettingsResponse(login.settings),
 		"languages": s.viewerLanguageOptions(),
 		"session": map[string]any{
-			"session_id": sessionID,
-			"expires_at": expiresAt.UTC(),
+			"session_id": login.sessionID,
+			"expires_at": login.expiresAt.UTC(),
 		},
 	})
 }
@@ -328,26 +405,5 @@ func (s *Server) sessionExpiry(now time.Time) time.Time {
 }
 
 func isUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-
-	for idx, ch := range value {
-		switch idx {
-		case 8, 13, 18, 23:
-			if ch != '-' {
-				return false
-			}
-			continue
-		}
-
-		switch {
-		case ch >= '0' && ch <= '9':
-		case ch >= 'a' && ch <= 'f':
-		case ch >= 'A' && ch <= 'F':
-		default:
-			return false
-		}
-	}
-	return true
+	return uuidPattern.MatchString(value)
 }

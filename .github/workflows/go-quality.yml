@@ -10,6 +10,21 @@ jobs:
     name: Backend Slophammer Gates
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: news
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: news_pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U news"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,13 +39,17 @@ jobs:
         run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check .
 
       - name: DRY check
-        working-directory: backend
-        run: ./scripts/check-go-dry.sh
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go dry .
 
       - name: CRAP check
-        working-directory: backend
-        run: ./scripts/check-go-crap.sh
+        env:
+          DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go crap .
 
       - name: Mutation smoke check
-        working-directory: backend
-        run: ./scripts/check-go-mutation.sh
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go mutate . --scan
+
+      - name: Executable Slophammer check
+        env:
+          DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check . --execute

@@ -1,12 +1,15 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"horse.fit/scoop/internal/db"
 	textnormalize "horse.fit/scoop/internal/normalize"
+	"horse.fit/scoop/internal/textmetrics"
 )
 
 func TestNormalizeURL_StripsTrackingAndNormalizes(t *testing.T) {
@@ -33,7 +36,7 @@ func TestNormalizeURL_Invalid(t *testing.T) {
 func TestTitleTokenJaccard(t *testing.T) {
 	t.Parallel()
 
-	score := titleTokenJaccard("Acme launches orbital drone", "Acme launches drone platform")
+	score := textmetrics.TitleTokenJaccard("Acme launches orbital drone", "Acme launches drone platform")
 	if score <= 0 || score >= 1 {
 		t.Fatalf("expected partial overlap score in (0,1), got %f", score)
 	}
@@ -42,7 +45,7 @@ func TestTitleTokenJaccard(t *testing.T) {
 func TestTitleTrigramJaccard(t *testing.T) {
 	t.Parallel()
 
-	score := titleTrigramJaccard("OpenAI releases model", "OpenAI released model")
+	score := textmetrics.TitleTrigramJaccard("OpenAI releases model", "OpenAI released model")
 	if score <= 0 || score >= 1 {
 		t.Fatalf("expected partial trigram overlap score in (0,1), got %f", score)
 	}
@@ -59,6 +62,92 @@ func TestTitleSimhashDistance(t *testing.T) {
 	}
 	if distance != 2 {
 		t.Fatalf("unexpected simhash distance: got %d want 2", distance)
+	}
+}
+
+func TestBestLexicalAutoMergePrefersClosestSimhash(t *testing.T) {
+	t.Parallel()
+
+	publishedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	articleHash := int64(0b101010)
+	nearHash := int64(0b101011)
+	farHash := int64(0b111000)
+	article := pendingArticle{
+		NormalizedTitle: "openclaw gateway setup guide",
+		PublishedAt:     &publishedAt,
+		TitleSimhash:    &articleHash,
+	}
+	candidates := []storyCandidate{
+		{
+			StoryID:      1,
+			Title:        "openclaw gateway install notes",
+			LastSeenAt:   publishedAt.Add(2 * time.Hour),
+			TitleSimhash: &farHash,
+		},
+		{
+			StoryID:      2,
+			Title:        "openclaw gateway setup guide",
+			LastSeenAt:   publishedAt.Add(time.Hour),
+			TitleSimhash: &nearHash,
+		},
+	}
+
+	match := bestLexicalAutoMerge(article, candidates)
+	if match.Candidate.StoryID != 2 {
+		t.Fatalf("expected closest simhash story 2, got %d", match.Candidate.StoryID)
+	}
+	if match.Signal != "lexical_simhash" {
+		t.Fatalf("expected lexical_simhash signal, got %q", match.Signal)
+	}
+	if match.SimhashDistance == nil || *match.SimhashDistance != 1 {
+		t.Fatalf("expected distance 1, got %v", match.SimhashDistance)
+	}
+}
+
+func TestBestLexicalAutoMergeUsesOverlapWhenSimhashUnavailable(t *testing.T) {
+	t.Parallel()
+
+	publishedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	article := pendingArticle{
+		NormalizedTitle: "openclaw cron plugin setup",
+		PublishedAt:     &publishedAt,
+	}
+	candidates := []storyCandidate{
+		{
+			StoryID:    7,
+			Title:      "openclaw cron plugin setup",
+			LastSeenAt: publishedAt.Add(30 * time.Minute),
+		},
+	}
+
+	match := bestLexicalAutoMerge(article, candidates)
+	if match.Candidate.StoryID != 7 {
+		t.Fatalf("expected overlap story 7, got %d", match.Candidate.StoryID)
+	}
+	if match.Signal != "lexical_overlap" {
+		t.Fatalf("expected lexical_overlap signal, got %q", match.Signal)
+	}
+	if match.TitleOverlap < defaultLexicalTrigramThreshold {
+		t.Fatalf("expected overlap above threshold, got %f", match.TitleOverlap)
+	}
+}
+
+func TestLexicalOverlapRejectsStaleCandidate(t *testing.T) {
+	t.Parallel()
+
+	publishedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	article := pendingArticle{
+		NormalizedTitle: "openclaw cron plugin setup",
+		PublishedAt:     &publishedAt,
+	}
+	candidate := storyCandidate{
+		StoryID:    9,
+		Title:      "openclaw cron plugin setup",
+		LastSeenAt: publishedAt.Add(-30 * 24 * time.Hour),
+	}
+
+	if _, ok := lexicalOverlapMatch(article, candidate); ok {
+		t.Fatalf("expected stale lexical candidate to be rejected")
 	}
 }
 
@@ -113,6 +202,25 @@ func TestShouldMarkSemanticGrayZone(t *testing.T) {
 	}
 	if shouldMarkSemanticGrayZone(0.75) {
 		t.Fatalf("did not expect low cosine to be gray zone")
+	}
+}
+
+func TestMatchTypeForSignal(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"exact_url":           "exact_url",
+		"exact_source_id":     "exact_source_id",
+		"exact_content_hash":  "exact_content_hash",
+		"lexical_simhash":     "lexical_simhash",
+		"lexical_overlap":     "lexical_overlap",
+		"semantic":            "semantic",
+		"unrecognized_signal": "manual",
+	}
+	for signal, want := range cases {
+		if got := matchTypeForSignal(signal); got != want {
+			t.Fatalf("matchTypeForSignal(%q) = %q, want %q", signal, got, want)
+		}
 	}
 }
 
@@ -232,4 +340,126 @@ func TestNormalizeISO6391Language(t *testing.T) {
 	if got := normalizeISO6391Language("english"); got != "" {
 		t.Fatalf("expected empty normalization for non-iso input, got %q", got)
 	}
+}
+
+func TestSemanticCandidateEvaluation(t *testing.T) {
+	t.Parallel()
+
+	published := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	article := pendingArticle{
+		NormalizedTitle: "openclaw setup guide",
+		PublishedAt:     &published,
+	}
+	candidates := []semanticCandidate{
+		{StoryID: 1, Title: "unrelated hardware discussion", LastSeenAt: published, Cosine: 0.88},
+		{StoryID: 2, Title: "openclaw setup guide", LastSeenAt: published.Add(time.Hour), Cosine: defaultSemanticAutoMergeCosine},
+	}
+	evaluation := evaluateSemanticCandidates(article, candidates)
+	if evaluation.best == nil || evaluation.best.Candidate.StoryID != 2 {
+		t.Fatalf("best semantic match = %#v, want story 2", evaluation.best)
+	}
+	if evaluation.autoMerge == nil || evaluation.autoMerge.Candidate.StoryID != 2 {
+		t.Fatalf("auto merge = %#v, want story 2", evaluation.autoMerge)
+	}
+	if !shouldAutoMergeSemantic(defaultSemanticOverrideCosine, 0) {
+		t.Fatalf("override cosine should auto-merge without title overlap")
+	}
+	if shouldAutoMergeSemantic(defaultSemanticAutoMergeCosine, 0) {
+		t.Fatalf("auto-merge threshold should still require title overlap")
+	}
+}
+
+func TestLexicalAndSemanticEventDetails(t *testing.T) {
+	t.Parallel()
+
+	distance := 3
+	match := lexicalAutoMergeMatch{
+		Candidate:       storyCandidate{StoryID: 42},
+		Signal:          "lexical_simhash",
+		TitleOverlap:    0.8,
+		DateConsistency: 1,
+		CompositeScore:  0.9,
+		MatchScore:      0.95,
+		SimhashDistance: &distance,
+	}
+	details := lexicalMatchDetails(match)
+	if details["simhash_distance"] != 3 || details["signal"] != "lexical_simhash" {
+		t.Fatalf("lexical details = %#v", details)
+	}
+
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	semantic := semanticMatch{
+		Candidate:       semanticCandidate{StoryID: 99, Cosine: 0.91},
+		TitleOverlap:    0.7,
+		DateConsistency: 0.6,
+		CompositeScore:  0.8,
+	}
+	event := grayZoneDedupEvent(7, 8, semantic, now)
+	if event.BestCandidateStoryID == nil || *event.BestCandidateStoryID != 99 {
+		t.Fatalf("gray zone event = %#v", event)
+	}
+	if event.BestCosine == nil || *event.BestCosine != 0.91 {
+		t.Fatalf("gray zone cosine = %v", event.BestCosine)
+	}
+}
+
+func TestDedupRunConfigDefaultsAndApplyDecision(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(nil, zerolog.Nop())
+	if _, shouldRun, err := service.dedupRunConfig(DedupOptions{Limit: 1}); err == nil || shouldRun {
+		t.Fatalf("nil pool dedupRunConfig should fail and not run")
+	}
+
+	service.pool = fakePoolForConfig()
+	cfg, shouldRun, err := service.dedupRunConfig(DedupOptions{Limit: 2})
+	if err != nil || !shouldRun {
+		t.Fatalf("dedupRunConfig() cfg=%#v shouldRun=%t err=%v", cfg, shouldRun, err)
+	}
+	if cfg.modelName != DefaultEmbeddingModelName || cfg.modelVersion != DefaultEmbeddingModelVersion {
+		t.Fatalf("dedup defaults = %#v", cfg)
+	}
+	if _, shouldRun, err := service.dedupRunConfig(DedupOptions{}); err != nil || shouldRun {
+		t.Fatalf("zero limit should not run: shouldRun=%t err=%v", shouldRun, err)
+	}
+
+	result := applyDedupDecision(DedupResult{}, decisionNewStory)
+	result = applyDedupDecision(result, decisionAutoMerge)
+	result = applyDedupDecision(result, decisionGrayZone)
+	result = applyDedupDecision(result, decisionNone)
+	if result.Processed != 3 || result.NewStories != 1 || result.AutoMerges != 1 || result.GrayZones != 1 {
+		t.Fatalf("dedup result = %#v", result)
+	}
+}
+
+func TestSmallPipelineValueHelpers(t *testing.T) {
+	t.Parallel()
+
+	sourceTime := time.Date(2026, 5, 14, 12, 0, 0, 0, time.FixedZone("offset", 3600))
+	if got := completePublishedAt(nil, &sourceTime); got == nil || got.Location() != time.UTC {
+		t.Fatalf("completePublishedAt() = %v, want UTC source time", got)
+	}
+	url := " https://example.com/item "
+	if got := completeCanonicalURL("", &url); got != strings.TrimSpace(url) {
+		t.Fatalf("completeCanonicalURL() = %q", got)
+	}
+	if got := completeCollection("", " "); got != "unknown" {
+		t.Fatalf("completeCollection() = %q, want unknown", got)
+	}
+	if stringPtrIfNotEmpty("") != nil || stringPtrIfNotEmpty("x") == nil {
+		t.Fatalf("stringPtrIfNotEmpty should only return a pointer for non-empty values")
+	}
+	if hashBytesIfNotEmpty("") != nil || len(hashBytesIfNotEmpty("x")) == 0 {
+		t.Fatalf("hashBytesIfNotEmpty should hash only non-empty values")
+	}
+	if nullableBytes(nil) != nil || len(nullableBytes([]byte{1, 2})) != 2 {
+		t.Fatalf("nullableBytes should copy non-empty byte slices")
+	}
+	if semanticCompositeScore(-1, 0, 0) != 0 || semanticCompositeScore(2, 2, 2) != 1 {
+		t.Fatalf("semanticCompositeScore should clamp to [0,1]")
+	}
+}
+
+func fakePoolForConfig() *db.Pool {
+	return &db.Pool{}
 }

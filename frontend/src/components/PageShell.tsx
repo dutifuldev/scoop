@@ -9,7 +9,12 @@ interface PageShellProps {
   children: ReactNode;
 }
 
-export function PageShell({ variant = "viewer", headerLeft, headerRight, children }: PageShellProps): JSX.Element {
+export function PageShell({
+  variant = "viewer",
+  headerLeft,
+  headerRight,
+  children,
+}: PageShellProps): JSX.Element {
   const classNames = ["app-root"];
   if (variant === "viewer") {
     classNames.push("app-root-viewer");

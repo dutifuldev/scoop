@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -25,11 +24,10 @@ func (s *Server) handleTags(c echo.Context) error {
 }
 
 func (s *Server) handleAddArticleTag(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	articleUUID, err := articleUUIDFromParam(c)
+	if err != nil {
+		return err
 	}
-
 	var req articleTagRequest
 	if err := decodeJSONBody(c, &req); err != nil {
 		return failValidation(c, map[string]string{"body": err.Error()})
@@ -39,48 +37,32 @@ func (s *Server) handleAddArticleTag(c echo.Context) error {
 		return failValidation(c, map[string]string{"tag": err.Error()})
 	}
 
-	principal, ok := principalFromContext(c)
+	actorUserID, ok := actorUserIDFromContext(c)
 	if !ok {
-		return unauthorizedResponse(c)
+		return nil
 	}
-	actorUserID := principal.UserID
-	if err := s.pool.AddArticleTag(c.Request().Context(), articleUUID, tagSlug, &actorUserID, globaltime.UTC()); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article or tag not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"article_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag", tagSlug).Msg("add article tag failed")
-		return internalError(c, "Failed to add article tag")
+	if err := s.pool.AddArticleTag(c.Request().Context(), articleUUID, tagSlug, actorUserID, globaltime.UTC()); err != nil {
+		return s.handleArticleRelationMutationError(c, err, "Article or tag not found", "article_uuid", "tag", tagSlug, "add article tag failed", "Failed to add article tag")
 	}
 	return success(c, map[string]any{"article_uuid": articleUUID, "tag": tagSlug})
 }
 
 func (s *Server) handleRemoveArticleTag(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	articleUUID, err := articleUUIDFromParam(c)
+	if err != nil {
+		return err
 	}
 	tagSlug := db.NormalizeTagSlug(c.Param("tag"))
 	if err := db.ValidateTagSlug(tagSlug); err != nil {
 		return failValidation(c, map[string]string{"tag": err.Error()})
 	}
 
-	principal, ok := principalFromContext(c)
+	actorUserID, ok := actorUserIDFromContext(c)
 	if !ok {
-		return unauthorizedResponse(c)
+		return nil
 	}
-	actorUserID := principal.UserID
-	if err := s.pool.RemoveArticleTag(c.Request().Context(), articleUUID, tagSlug, &actorUserID); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article or tag not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"article_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Str("tag", tagSlug).Msg("remove article tag failed")
-		return internalError(c, "Failed to remove article tag")
+	if err := s.pool.RemoveArticleTag(c.Request().Context(), articleUUID, tagSlug, actorUserID); err != nil {
+		return s.handleArticleRelationMutationError(c, err, "Article or tag not found", "article_uuid", "tag", tagSlug, "remove article tag failed", "Failed to remove article tag")
 	}
 	return success(c, map[string]any{"article_uuid": articleUUID, "tag": tagSlug})
 }

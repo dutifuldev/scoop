@@ -126,19 +126,44 @@ func validateSemantics(item *NewsItem) error {
 		return fmt.Errorf("payload is nil")
 	}
 
-	if strings.TrimSpace(item.Source) == "" {
-		return fmt.Errorf("source must not be empty")
+	checks := []func(*NewsItem) error{
+		validateRequiredNewsItemFields,
+		validateOptionalNewsItemURIs,
+		validateOptionalPublishedAt,
+		validateAuthors,
+		validateTags,
 	}
-	if strings.TrimSpace(item.SourceItemID) == "" {
-		return fmt.Errorf("source_item_id must not be empty")
+	for _, check := range checks {
+		if err := check(item); err != nil {
+			return err
+		}
 	}
-	if strings.TrimSpace(item.Title) == "" {
-		return fmt.Errorf("title must not be empty")
+
+	return nil
+}
+
+func validateRequiredNewsItemFields(item *NewsItem) error {
+	required := []struct {
+		field string
+		value string
+	}{
+		{field: "source", value: item.Source},
+		{field: "source_item_id", value: item.SourceItemID},
+		{field: "title", value: item.Title},
+		{field: "payload_version", value: item.PayloadVersion},
+	}
+	for _, entry := range required {
+		if strings.TrimSpace(entry.value) == "" {
+			return fmt.Errorf("%s must not be empty", entry.field)
+		}
 	}
 	if strings.TrimSpace(item.PayloadVersion) != "v1" {
 		return fmt.Errorf("payload_version must be v1")
 	}
+	return nil
+}
 
+func validateOptionalNewsItemURIs(item *NewsItem) error {
 	if item.CanonicalURL != nil {
 		if err := validateURI("canonical_url", *item.CanonicalURL); err != nil {
 			return err
@@ -149,23 +174,33 @@ func validateSemantics(item *NewsItem) error {
 			return err
 		}
 	}
-	if item.PublishedAt != nil {
-		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(*item.PublishedAt)); err != nil {
-			return fmt.Errorf("published_at must be RFC3339: %w", err)
-		}
-	}
+	return nil
+}
 
-	for i, author := range item.Authors {
-		if strings.TrimSpace(author) == "" {
-			return fmt.Errorf("authors[%d] must not be empty", i)
-		}
+func validateOptionalPublishedAt(item *NewsItem) error {
+	if item.PublishedAt == nil {
+		return nil
 	}
-	for i, tag := range item.Tags {
-		if strings.TrimSpace(tag) == "" {
-			return fmt.Errorf("tags[%d] must not be empty", i)
-		}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(*item.PublishedAt)); err != nil {
+		return fmt.Errorf("published_at must be RFC3339: %w", err)
 	}
+	return nil
+}
 
+func validateAuthors(item *NewsItem) error {
+	return validateNonEmptyStringList("authors", item.Authors)
+}
+
+func validateTags(item *NewsItem) error {
+	return validateNonEmptyStringList("tags", item.Tags)
+}
+
+func validateNonEmptyStringList(field string, values []string) error {
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s[%d] must not be empty", field, i)
+		}
+	}
 	return nil
 }
 

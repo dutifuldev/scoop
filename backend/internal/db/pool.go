@@ -32,7 +32,10 @@ type Row struct {
 }
 
 func (r *Row) Scan(dest ...any) error {
-	if r == nil || r.row == nil {
+	if r == nil {
+		return ErrNoRows
+	}
+	if r.row == nil {
 		return ErrNoRows
 	}
 	return r.row.Scan(dest...)
@@ -57,7 +60,10 @@ func (r *Rows) Scan(dest ...any) error {
 }
 
 func (r *Rows) Err() error {
-	if r == nil || r.rows == nil {
+	if r == nil {
+		return nil
+	}
+	if r.rows == nil {
 		return nil
 	}
 	return r.rows.Err()
@@ -100,13 +106,19 @@ func (t *gormTx) Exec(ctx context.Context, query string, args ...any) (CommandTa
 }
 
 func (t *gormTx) Commit(ctx context.Context) error {
-	res := t.db.WithContext(ctx).Commit()
-	return res.Error
+	return finishGormTx(ctx, t.db, true)
 }
 
 func (t *gormTx) Rollback(ctx context.Context) error {
-	res := t.db.WithContext(ctx).Rollback()
-	return res.Error
+	return finishGormTx(ctx, t.db, false)
+}
+
+func finishGormTx(ctx context.Context, tx *gorm.DB, commit bool) error {
+	scoped := tx.WithContext(ctx)
+	if commit {
+		return scoped.Commit().Error
+	}
+	return scoped.Rollback().Error
 }
 
 type Pool struct {
@@ -119,35 +131,14 @@ func NewPool(ctx context.Context, cfg *config.Config) (*Pool, error) {
 		return nil, fmt.Errorf("config is nil")
 	}
 
-	logLevel := resolveGormLogLevel(cfg.LogLevel, cfg.Environment)
-
-	gdb, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
-		NowFunc: func() time.Time {
-			return time.Now().UTC()
-		},
-	})
+	gdb, err := openGormDatabase(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open gorm database: %w", err)
+		return nil, err
 	}
 
-	sqlDB, err := gdb.DB()
+	sqlDB, err := configureSQLDatabase(ctx, gdb, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("get gorm sql db: %w", err)
-	}
-
-	maxOpen := int(cfg.DBMaxConns)
-	if maxOpen <= 0 {
-		maxOpen = 8
-	}
-	sqlDB.SetMaxOpenConns(maxOpen)
-	sqlDB.SetMaxIdleConns(max(1, min(int(cfg.DBMinConns), maxOpen)))
-	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
-
-	if err := sqlDB.PingContext(ctx); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, err
 	}
 
 	pool := &Pool{
@@ -160,6 +151,58 @@ func NewPool(ctx context.Context, cfg *config.Config) (*Pool, error) {
 	}
 
 	return pool, nil
+}
+
+// NewIntegrationTestPool opens a single-connection pool for database-backed integration tests.
+func NewIntegrationTestPool(ctx context.Context, databaseURL string) (*Pool, error) {
+	return NewPool(ctx, &config.Config{
+		DatabaseURL:       databaseURL,
+		DBMinConns:        0,
+		DBMaxConns:        1,
+		Environment:       "test",
+		LogLevel:          "silent",
+		DefaultAdminUser:  "admin",
+		SessionTTLHours:   1,
+		SessionCookieName: "scoop_session",
+	})
+}
+
+func openGormDatabase(cfg *config.Config) (*gorm.DB, error) {
+	logLevel := resolveGormLogLevel(cfg.LogLevel, cfg.Environment)
+	gdb, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
+		Logger: logger.Default.LogMode(logLevel),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open gorm database: %w", err)
+	}
+	return gdb, nil
+}
+
+func configureSQLDatabase(ctx context.Context, gdb *gorm.DB, cfg *config.Config) (*sql.DB, error) {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get gorm sql db: %w", err)
+	}
+	configureSQLPool(sqlDB, cfg)
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return sqlDB, nil
+}
+
+func configureSQLPool(sqlDB *sql.DB, cfg *config.Config) {
+	maxOpen := int(cfg.DBMaxConns)
+	if maxOpen <= 0 {
+		maxOpen = 8
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(max(1, min(int(cfg.DBMinConns), maxOpen)))
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 }
 
 func (p *Pool) BeginTx(ctx context.Context, _ TxOptions) (Tx, error) {
@@ -207,17 +250,21 @@ func (p *Pool) Close() error {
 }
 
 func (p *Pool) DB() *sql.DB {
+	return poolSQLDB(p)
+}
+
+func (p *Pool) GORM() *gorm.DB {
+	if p == nil || p.gdb == nil {
+		return nil
+	}
+	return p.gdb
+}
+
+func poolSQLDB(p *Pool) *sql.DB {
 	if p == nil {
 		return nil
 	}
 	return p.sqlDB
-}
-
-func (p *Pool) GORM() *gorm.DB {
-	if p == nil {
-		return nil
-	}
-	return p.gdb
 }
 
 func IsNoRows(err error) bool {

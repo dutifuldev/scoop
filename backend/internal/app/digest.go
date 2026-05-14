@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,9 +19,20 @@ type digestOutput struct {
 	Yesterday  []db.StorySummary `json:"yesterday"`
 }
 
+type digestCommandConfig struct {
+	envLoader  *cli.EnvLoader
+	timeout    time.Duration
+	collection string
+	date       time.Time
+	format     string
+}
+
 func runDigest(args []string) int {
-	fs := flag.NewFlagSet("digest", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseDigestCommand, executeDigestCommand)
+}
+
+func parseDigestCommand(args []string) (digestCommandConfig, int, bool) {
+	fs := newAppFlagSet("digest")
 
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
@@ -30,86 +42,86 @@ func runDigest(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return digestCommandConfig{}, 0, false
 		}
-		return 2
+		return digestCommandConfig{}, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "digest does not accept positional arguments")
-		return 2
+		return digestCommandConfig{}, 2, false
 	}
 
 	targetCollection := normalizeCollectionFlag(*collection)
 	if targetCollection == "" {
 		fmt.Fprintln(os.Stderr, "--collection is required")
-		return 2
+		return digestCommandConfig{}, 2, false
 	}
 
 	outputFormat, err := parseOutputFormat(*format, outputFormatJSON)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+		return digestCommandConfig{}, 2, false
 	}
 
 	targetDay, err := parseUTCDate(*date)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid --date: %v\n", err)
-		return 2
+		return digestCommandConfig{}, 2, false
 	}
-	dayStart, dayEnd := utcDayBounds(targetDay)
+	return digestCommandConfig{
+		envLoader:  envLoader,
+		timeout:    *timeout,
+		collection: targetCollection,
+		date:       targetDay,
+		format:     outputFormat,
+	}, 0, true
+}
 
-	yesterday := targetDay.AddDate(0, 0, -1)
-	yesterdayStart, yesterdayEnd := utcDayBounds(yesterday)
+func executeDigestCommand(cfg digestCommandConfig) int {
+	return runReadPoolValue(
+		cfg.timeout,
+		cfg.envLoader,
+		func(ctx context.Context, pool *db.Pool) (digestOutput, error) { return queryDigest(ctx, pool, cfg) },
+		func(result digestOutput) int { return renderDigest(result, cfg.format) },
+	)
+}
 
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+func queryDigest(ctx context.Context, pool *db.Pool, cfg digestCommandConfig) (digestOutput, error) {
+	dayStart, dayEnd := utcDayBounds(cfg.date)
+	yesterdayStart, yesterdayEnd := utcDayBounds(cfg.date.AddDate(0, 0, -1))
+	todayStories, err := pool.ListDigestStories(ctx, cfg.collection, dayStart, dayEnd)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return digestOutput{}, fmt.Errorf("failed to query today's digest stories: %w", err)
 	}
-	defer cancel()
-	defer pool.Close()
-
-	todayStories, err := pool.ListDigestStories(ctx, targetCollection, dayStart, dayEnd)
+	yesterdayStories, err := pool.ListDigestStories(ctx, cfg.collection, yesterdayStart, yesterdayEnd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query today's digest stories: %v\n", err)
-		return 1
+		return digestOutput{}, fmt.Errorf("failed to query yesterday's digest stories: %w", err)
 	}
-	yesterdayStories, err := pool.ListDigestStories(ctx, targetCollection, yesterdayStart, yesterdayEnd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to query yesterday's digest stories: %v\n", err)
-		return 1
-	}
-
-	result := digestOutput{
-		Date:       targetDay.Format("2006-01-02"),
-		Collection: targetCollection,
+	return digestOutput{
+		Date:       cfg.date.Format("2006-01-02"),
+		Collection: cfg.collection,
 		Today:      todayStories,
 		Yesterday:  yesterdayStories,
-	}
+	}, nil
+}
 
-	if outputFormat == outputFormatJSON {
-		if err := printJSON(result); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
-			return 1
-		}
-		return 0
-	}
+func renderDigest(result digestOutput, outputFormat string) int {
+	return renderJSONOrTable(result, outputFormat, func() error { return writeDigestTables(result) })
+}
 
+func writeDigestTables(result digestOutput) error {
 	fmt.Printf("date: %s\n", result.Date)
 	fmt.Printf("collection: %s\n\n", result.Collection)
 
 	fmt.Println("today")
 	if err := writeStorySummaryTable(result.Today); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render today table: %v\n", err)
-		return 1
+		return fmt.Errorf("failed to render today table: %w", err)
 	}
 
 	fmt.Println()
 	fmt.Println("yesterday")
 	if err := writeStorySummaryTable(result.Yesterday); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to render yesterday table: %v\n", err)
-		return 1
+		return fmt.Errorf("failed to render yesterday table: %w", err)
 	}
-
-	return 0
+	return nil
 }

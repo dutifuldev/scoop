@@ -27,3 +27,17 @@ func TestNormalizeUsername(t *testing.T) {
 		t.Fatalf("unexpected normalized username: %q", got)
 	}
 }
+
+func TestPasswordValidationRejectsBlankValues(t *testing.T) {
+	t.Parallel()
+
+	if _, err := HashPassword(" \t "); err == nil {
+		t.Fatalf("HashPassword(blank) error = nil, want validation error")
+	}
+	if VerifyPassword("", "$2a$12$abcdefghijklmnopqrstuuuuuuuuuuuuuuuuuuuuuuuuuuuu") {
+		t.Fatalf("VerifyPassword should reject blank password")
+	}
+	if VerifyPassword("secret", " ") {
+		t.Fatalf("VerifyPassword should reject blank hash")
+	}
+}

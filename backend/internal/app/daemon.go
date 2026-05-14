@@ -22,153 +22,215 @@ var daemonUnitNames = []string{
 	daemonFrontendUnitName,
 }
 
+type daemonInstallConfig struct {
+	userName     string
+	backendPort  int
+	frontendPort int
+	scoopDir     string
+}
+
+type daemonInstallDeps struct {
+	requireRoot     func(string) error
+	resolveScoopDir func(string) (string, error)
+	resolveNodePnpm func() (string, string, error)
+	writeUnit       func(string, string) error
+	systemctl       func(...string) error
+}
+
+type daemonUninstallDeps struct {
+	requireRoot func(string) error
+	stopDisable func() int
+	removeUnits func() int
+	systemctl   func(...string) error
+}
+
 func runDaemon(args []string) int {
-	if len(args) == 0 {
-		printDaemonUsage()
-		return 2
+	action, remainingArgs, exitCode, ok := parseDaemonAction(args)
+	if !ok {
+		return exitCode
 	}
 
+	switch action {
+	case "install":
+		return runDaemonInstall(remainingArgs)
+	case "uninstall":
+		return runDaemonUninstall(remainingArgs)
+	case "status":
+		return runDaemonServiceAction(action, remainingArgs, false)
+	default:
+		return runDaemonServiceAction(action, remainingArgs, true)
+	}
+}
+
+func parseDaemonAction(args []string) (string, []string, int, bool) {
+	if len(args) == 0 {
+		printDaemonUsage()
+		return "", nil, 2, false
+	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
 	switch action {
 	case "help", "-h", "--help":
 		printDaemonUsage()
-		return 0
-	case "install":
-		return runDaemonInstall(args[1:])
-	case "uninstall":
-		return runDaemonUninstall(args[1:])
-	case "start":
-		return runDaemonServiceAction("start", args[1:], true)
-	case "stop":
-		return runDaemonServiceAction("stop", args[1:], true)
-	case "restart":
-		return runDaemonServiceAction("restart", args[1:], true)
-	case "status":
-		return runDaemonServiceAction("status", args[1:], false)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown daemon action: %s\n\n", args[0])
-		printDaemonUsage()
-		return 2
+		return "", nil, 0, false
+	case "install", "uninstall", "start", "stop", "restart", "status":
+		return action, args[1:], 0, true
 	}
+	fmt.Fprintf(os.Stderr, "unknown daemon action: %s\n\n", args[0])
+	printDaemonUsage()
+	return "", nil, 2, false
 }
 
 func runDaemonInstall(args []string) int {
-	fs := flag.NewFlagSet("daemon install", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseDaemonInstallConfig, installDaemonServices)
+}
 
-	defaultUser := strings.TrimSpace(os.Getenv("USER"))
-	if defaultUser == "" {
-		defaultUser = "root"
-	}
+func parseDaemonInstallConfig(args []string) (daemonInstallConfig, int, bool) {
+	fs := newAppFlagSet("daemon install")
 
-	userName := fs.String("user", defaultUser, "Run services as this Linux user")
+	userName := fs.String("user", defaultDaemonUser(), "Run services as this Linux user")
 	backendPort := fs.Int("backend-port", 8090, "Port for scoop-serve")
 	frontendPort := fs.Int("frontend-port", 5173, "Port for scoop-frontend")
 	scoopDir := fs.String("scoop-dir", "", "Scoop root containing backend/ and frontend/ (auto-detected if empty)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return daemonInstallConfig{}, 0, false
 		}
-		return 2
+		return daemonInstallConfig{}, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "daemon install does not accept positional args")
-		return 2
+		return daemonInstallConfig{}, 2, false
 	}
-	if err := validatePort(*backendPort, "--backend-port"); err != nil {
+	cfg := daemonInstallConfig{
+		userName:     strings.TrimSpace(*userName),
+		backendPort:  *backendPort,
+		frontendPort: *frontendPort,
+		scoopDir:     *scoopDir,
+	}
+	if err := validateDaemonInstallConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 2
+		return daemonInstallConfig{}, 2, false
 	}
-	if err := validatePort(*frontendPort, "--frontend-port"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
-	}
-	if strings.TrimSpace(*userName) == "" {
-		fmt.Fprintln(os.Stderr, "--user must not be empty")
-		return 2
-	}
-	if err := requireRoot("install"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
+	return cfg, 0, true
+}
 
-	resolvedScoopDir, err := resolveScoopDir(*scoopDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to resolve --scoop-dir: %v\n", err)
-		return 2
+func defaultDaemonUser() string {
+	defaultUser := strings.TrimSpace(os.Getenv("USER"))
+	if defaultUser == "" {
+		return "root"
 	}
-	pnpmPath, nodePath, err := resolveNodeAndPnpm()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to locate node/pnpm in PATH: %v\n", err)
-		return 1
-	}
+	return defaultUser
+}
 
-	serveUnit := buildServeUnitFile(strings.TrimSpace(*userName), resolvedScoopDir, *backendPort)
-	frontendUnit := buildFrontendUnitFile(strings.TrimSpace(*userName), resolvedScoopDir, pnpmPath, nodePath, *frontendPort)
+func validateDaemonInstallConfig(cfg daemonInstallConfig) error {
+	if err := validatePort(cfg.backendPort, "--backend-port"); err != nil {
+		return err
+	}
+	if err := validatePort(cfg.frontendPort, "--frontend-port"); err != nil {
+		return err
+	}
+	if cfg.userName == "" {
+		return fmt.Errorf("--user must not be empty")
+	}
+	return nil
+}
 
-	if err := writeUnitFile(daemonServeUnitName, serveUnit); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write %s: %v\n", daemonServeUnitName, err)
-		return 1
-	}
-	if err := writeUnitFile(daemonFrontendUnitName, frontendUnit); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write %s: %v\n", daemonFrontendUnitName, err)
-		return 1
-	}
-	if err := runSystemctl("daemon-reload"); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to reload systemd units: %v\n", err)
-		return 1
-	}
+func installDaemonServices(cfg daemonInstallConfig) int {
+	return installDaemonServicesWithDeps(cfg, daemonInstallDeps{
+		requireRoot:     requireRoot,
+		resolveScoopDir: resolveScoopDir,
+		resolveNodePnpm: resolveNodeAndPnpm,
+		writeUnit:       writeUnitFile,
+		systemctl:       runSystemctl,
+	})
+}
 
-	enableArgs := append([]string{"enable"}, daemonUnitNames...)
-	if err := runSystemctl(enableArgs...); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to enable services: %v\n", err)
-		return 1
+func installDaemonServicesWithDeps(cfg daemonInstallConfig, deps daemonInstallDeps) int {
+	unitFiles, exitCode, ok := prepareDaemonInstall(cfg, deps)
+	if !ok {
+		return exitCode
 	}
-
+	if exitCode := writeDaemonUnitFiles(unitFiles, deps.writeUnit); exitCode != 0 {
+		return exitCode
+	}
+	if exitCode := reloadAndEnableDaemonUnits(deps.systemctl); exitCode != 0 {
+		return exitCode
+	}
 	fmt.Printf("Installed %s and %s\n", daemonServeUnitName, daemonFrontendUnitName)
 	fmt.Println("Services are enabled on boot. Run `scoop daemon start` to start them now.")
 	return 0
 }
 
-func runDaemonUninstall(args []string) int {
-	fs := flag.NewFlagSet("daemon uninstall", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "daemon uninstall does not accept positional args")
-		return 2
-	}
-	if err := requireRoot("uninstall"); err != nil {
+func prepareDaemonInstall(cfg daemonInstallConfig, deps daemonInstallDeps) (map[string]string, int, bool) {
+	if err := deps.requireRoot("install"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return nil, 1, false
 	}
-
-	stopArgs := append([]string{"stop"}, daemonUnitNames...)
-	if err := runSystemctl(stopArgs...); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to stop one or more services: %v\n", err)
+	resolvedScoopDir, err := deps.resolveScoopDir(cfg.scoopDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve --scoop-dir: %v\n", err)
+		return nil, 2, false
 	}
-
-	disableArgs := append([]string{"disable"}, daemonUnitNames...)
-	if err := runSystemctl(disableArgs...); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to disable one or more services: %v\n", err)
+	pnpmPath, nodePath, err := deps.resolveNodePnpm()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to locate node/pnpm in PATH: %v\n", err)
+		return nil, 1, false
 	}
+	return map[string]string{
+		daemonServeUnitName:    buildServeUnitFile(cfg.userName, resolvedScoopDir, cfg.backendPort),
+		daemonFrontendUnitName: buildFrontendUnitFile(cfg.userName, resolvedScoopDir, pnpmPath, nodePath, cfg.frontendPort),
+	}, 0, true
+}
 
-	for _, unitName := range daemonUnitNames {
-		unitPath := filepath.Join(systemdUnitDir, unitName)
-		if err := os.Remove(unitPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "Failed to remove %s: %v\n", unitPath, err)
+func writeDaemonUnitFiles(unitFiles map[string]string, writeUnit func(string, string) error) int {
+	for unitName, unitContent := range unitFiles {
+		if err := writeUnit(unitName, unitContent); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write %s: %v\n", unitName, err)
 			return 1
 		}
 	}
+	return 0
+}
 
-	if err := runSystemctl("daemon-reload"); err != nil {
+func reloadAndEnableDaemonUnits(systemctl func(...string) error) int {
+	if err := systemctl("daemon-reload"); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to reload systemd units: %v\n", err)
+		return 1
+	}
+	enableArgs := append([]string{"enable"}, daemonUnitNames...)
+	if err := systemctl(enableArgs...); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to enable services: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runDaemonUninstall(args []string) int {
+	exitCode, ok := parseDaemonNoArgCommand("daemon uninstall", args, "daemon uninstall does not accept positional args")
+	if !ok {
+		return exitCode
+	}
+	return runDaemonUninstallWithDeps(daemonUninstallDeps{
+		requireRoot: requireRoot,
+		stopDisable: stopAndDisableDaemonUnits,
+		removeUnits: removeDaemonUnitFiles,
+		systemctl:   runSystemctl,
+	})
+}
+
+func runDaemonUninstallWithDeps(deps daemonUninstallDeps) int {
+	if err := deps.requireRoot("uninstall"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if exitCode := deps.stopDisable(); exitCode != 0 {
+		return exitCode
+	}
+	if exitCode := deps.removeUnits(); exitCode != 0 {
+		return exitCode
+	}
+	if err := deps.systemctl("daemon-reload"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to reload systemd units: %v\n", err)
 		return 1
 	}
@@ -177,22 +239,51 @@ func runDaemonUninstall(args []string) int {
 	return 0
 }
 
-func runDaemonServiceAction(action string, args []string, requireRootPrivileges bool) int {
-	fs := flag.NewFlagSet("daemon "+action, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+func stopAndDisableDaemonUnits() int {
+	runSystemctlWithWarning("stop", "stop")
+	runSystemctlWithWarning("disable", "disable")
+	return 0
+}
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+func runSystemctlWithWarning(action, label string) {
+	args := append([]string{action}, daemonUnitNames...)
+	if err := runSystemctl(args...); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to %s one or more services: %v\n", label, err)
 	}
-	if fs.NArg() != 0 {
-		fmt.Fprintf(os.Stderr, "daemon %s does not accept positional args\n", action)
-		return 2
+}
+
+func removeDaemonUnitFiles() int {
+	return removeDaemonUnitFilesIn(systemdUnitDir)
+}
+
+func removeDaemonUnitFilesIn(unitDir string) int {
+	for _, unitName := range daemonUnitNames {
+		unitPath := filepath.Join(unitDir, unitName)
+		if err := os.Remove(unitPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Failed to remove %s: %v\n", unitPath, err)
+			return 1
+		}
+	}
+	return 0
+}
+
+func runDaemonServiceAction(action string, args []string, requireRootPrivileges bool) int {
+	return runDaemonServiceActionWithDeps(action, args, requireRootPrivileges, requireRoot, runSystemctl)
+}
+
+func runDaemonServiceActionWithDeps(
+	action string,
+	args []string,
+	requireRootPrivileges bool,
+	requireRootFunc func(string) error,
+	systemctlFunc func(...string) error,
+) int {
+	exitCode, ok := parseDaemonNoArgCommand("daemon "+action, args, fmt.Sprintf("daemon %s does not accept positional args", action))
+	if !ok {
+		return exitCode
 	}
 	if requireRootPrivileges {
-		if err := requireRoot(action); err != nil {
+		if err := requireRootFunc(action); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
@@ -205,11 +296,26 @@ func runDaemonServiceAction(action string, args []string, requireRootPrivileges 
 	}
 	systemctlArgs = append(systemctlArgs, daemonUnitNames...)
 
-	if err := runSystemctl(systemctlArgs...); err != nil {
+	if err := systemctlFunc(systemctlArgs...); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to %s services: %v\n", action, err)
 		return 1
 	}
 	return 0
+}
+
+func parseDaemonNoArgCommand(name string, args []string, positionalMessage string) (int, bool) {
+	fs := newAppFlagSet(name)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0, false
+		}
+		return 2, false
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, positionalMessage)
+		return 2, false
+	}
+	return 0, true
 }
 
 func validatePort(port int, flagName string) error {
@@ -229,16 +335,23 @@ func requireRoot(action string) error {
 func resolveScoopDir(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != "" {
-		absPath, err := filepath.Abs(trimmed)
-		if err != nil {
-			return "", fmt.Errorf("normalize path %q: %w", trimmed, err)
-		}
-		if !isScoopRoot(absPath) {
-			return "", fmt.Errorf("%q must contain backend/ and frontend/ directories", absPath)
-		}
-		return absPath, nil
+		return resolveExplicitScoopDir(trimmed)
 	}
+	return resolveDetectedScoopDir()
+}
 
+func resolveExplicitScoopDir(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("normalize path %q: %w", path, err)
+	}
+	if !isScoopRoot(absPath) {
+		return "", fmt.Errorf("%q must contain backend/ and frontend/ directories", absPath)
+	}
+	return absPath, nil
+}
+
+func resolveDetectedScoopDir() (string, error) {
 	detected, err := autoDetectScoopDir()
 	if err != nil {
 		return "", err
@@ -250,8 +363,19 @@ func resolveScoopDir(raw string) (string, error) {
 }
 
 func autoDetectScoopDir() (string, error) {
-	candidates := make([]string, 0, 6)
+	candidates := scoopDirCandidates()
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if found, ok := normalizedScoopCandidate(candidate, seen); ok {
+			return found, nil
+		}
+	}
 
+	return "", errors.New("unable to auto-detect scoop directory from executable location or cwd parent; use --scoop-dir")
+}
+
+func scoopDirCandidates() []string {
+	candidates := make([]string, 0, 6)
 	if exePath, err := os.Executable(); err == nil {
 		resolvedExePath := exePath
 		if resolvedPath, err := filepath.EvalSymlinks(exePath); err == nil {
@@ -265,27 +389,22 @@ func autoDetectScoopDir() (string, error) {
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, cwd, filepath.Dir(cwd))
 	}
+	return candidates
+}
 
-	seen := map[string]struct{}{}
-	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate) == "" {
-			continue
-		}
-		absPath, err := filepath.Abs(candidate)
-		if err != nil {
-			continue
-		}
-		if _, exists := seen[absPath]; exists {
-			continue
-		}
-		seen[absPath] = struct{}{}
-
-		if isScoopRoot(absPath) {
-			return absPath, nil
-		}
+func normalizedScoopCandidate(candidate string, seen map[string]struct{}) (string, bool) {
+	if strings.TrimSpace(candidate) == "" {
+		return "", false
 	}
-
-	return "", errors.New("unable to auto-detect scoop directory from executable location or cwd parent; use --scoop-dir")
+	absPath, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", false
+	}
+	if _, exists := seen[absPath]; exists {
+		return "", false
+	}
+	seen[absPath] = struct{}{}
+	return absPath, isScoopRoot(absPath)
 }
 
 func isScoopRoot(root string) bool {

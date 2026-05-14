@@ -37,7 +37,11 @@ export function DayPickerPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className={cn("day-popover", contentClassName)} align={align} sideOffset={sideOffset}>
+      <PopoverContent
+        className={cn("day-popover", contentClassName)}
+        align={align}
+        sideOffset={sideOffset}
+      >
         <Calendar
           key={value || "no-day"}
           mode="single"

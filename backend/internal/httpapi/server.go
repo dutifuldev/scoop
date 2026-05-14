@@ -177,6 +177,14 @@ type translateRequest struct {
 	Provider    string  `json:"provider"`
 }
 
+type translateRequestConfig struct {
+	storyUUID   string
+	articleUUID string
+	targetLang  string
+	provider    string
+	runOpts     translation.RunOptions
+}
+
 type updatedStory struct {
 	StoryUUID    string     `json:"story_uuid"`
 	Title        string     `json:"title"`
@@ -213,34 +221,7 @@ func newServer(
 	registry *translation.Registry,
 	service translation.Service,
 ) *Server {
-	host := strings.TrimSpace(opts.Host)
-	if host == "" {
-		host = "0.0.0.0"
-	}
-	port := opts.Port
-	if port <= 0 {
-		port = 8090
-	}
-	readTimeout := opts.ReadTimeout
-	if readTimeout <= 0 {
-		readTimeout = 10 * time.Second
-	}
-	writeTimeout := opts.WriteTimeout
-	if writeTimeout <= 0 {
-		writeTimeout = 30 * time.Second
-	}
-	shutdownTimeout := opts.ShutdownTimeout
-	if shutdownTimeout <= 0 {
-		shutdownTimeout = 10 * time.Second
-	}
-	sessionTTL := opts.SessionTTL
-	if sessionTTL <= 0 {
-		sessionTTL = 7 * 24 * time.Hour
-	}
-	sessionCookie := strings.TrimSpace(opts.SessionCookie)
-	if sessionCookie == "" {
-		sessionCookie = "scoop_session"
-	}
+	resolvedOpts := resolveServerOptions(opts)
 	if registry == nil {
 		registry = translation.NewRegistryFromEnv()
 	}
@@ -258,25 +239,88 @@ func newServer(
 		logger:             logger,
 		registry:           registry,
 		translationService: service,
-		opts: Options{
-			Host:               host,
-			Port:               port,
-			ReadTimeout:        readTimeout,
-			WriteTimeout:       writeTimeout,
-			ShutdownTimeout:    shutdownTimeout,
-			SessionTTL:         sessionTTL,
-			SessionCookie:      sessionCookie,
-			SessionSecure:      opts.SessionSecure,
-			CORSAllowedOrigins: append([]string(nil), opts.CORSAllowedOrigins...),
-		},
+		opts:               resolvedOpts,
 	}
 }
 
+func resolveServerOptions(opts Options) Options {
+	return Options{
+		Host:               defaultString(strings.TrimSpace(opts.Host), "0.0.0.0"),
+		Port:               defaultPositiveInt(opts.Port, 8090),
+		ReadTimeout:        defaultPositiveDuration(opts.ReadTimeout, 10*time.Second),
+		WriteTimeout:       defaultPositiveDuration(opts.WriteTimeout, 30*time.Second),
+		ShutdownTimeout:    defaultPositiveDuration(opts.ShutdownTimeout, 10*time.Second),
+		SessionTTL:         defaultPositiveDuration(opts.SessionTTL, 7*24*time.Hour),
+		SessionCookie:      defaultString(strings.TrimSpace(opts.SessionCookie), "scoop_session"),
+		SessionSecure:      opts.SessionSecure,
+		CORSAllowedOrigins: append([]string(nil), opts.CORSAllowedOrigins...),
+	}
+}
+
+func defaultString(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func defaultPositiveInt(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func defaultPositiveDuration(value time.Duration, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
 func (s *Server) Start(ctx context.Context) error {
-	if s == nil || s.pool == nil {
+	if !serverInitialized(s) {
 		return fmt.Errorf("server is not initialized")
 	}
+	e := s.newEcho()
+	registerRoutes(e, s)
+	return s.startEchoServer(ctx, e)
+}
 
+func serverInitialized(s *Server) bool {
+	return s != nil && s.pool != nil
+}
+
+func (s *Server) startEchoServer(ctx context.Context, e *echo.Echo) error {
+	addr := s.listenAddr()
+	go s.shutdownEchoWhenDone(ctx, e)
+	s.logger.Info().Str("addr", addr).Msg("scoop web server started")
+	return s.finishEchoServer(e.StartServer(s.httpServer(addr, e)))
+}
+
+func (s *Server) finishEchoServer(err error) error {
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("start server: %w", err)
+	}
+	s.logger.Info().Msg("scoop web server stopped")
+	return nil
+}
+
+func (s *Server) listenAddr() string {
+	return fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
+}
+
+func (s *Server) httpServer(addr string, e *echo.Echo) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      e,
+		ReadTimeout:  s.opts.ReadTimeout,
+		WriteTimeout: s.opts.WriteTimeout,
+		IdleTimeout:  60 * time.Second,
+	}
+}
+
+func (s *Server) newEcho() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -284,21 +328,30 @@ func (s *Server) Start(ctx context.Context) error {
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
-	corsConfig := middleware.CORSConfig{
+	e.Use(middleware.CORSWithConfig(s.corsConfig()))
+	e.Use(middleware.RequestLoggerWithConfig(s.requestLoggerConfig()))
+	return e
+}
+
+func (s *Server) corsConfig() middleware.CORSConfig {
+	config := middleware.CORSConfig{
 		AllowMethods:     []string{http.MethodGet, http.MethodOptions, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Cookie"},
 		AllowCredentials: true,
 		MaxAge:           3600,
 	}
 	if len(s.opts.CORSAllowedOrigins) > 0 {
-		corsConfig.AllowOrigins = append([]string(nil), s.opts.CORSAllowedOrigins...)
+		config.AllowOrigins = append([]string(nil), s.opts.CORSAllowedOrigins...)
 	} else {
-		corsConfig.AllowOriginFunc = func(origin string) (bool, error) {
+		config.AllowOriginFunc = func(origin string) (bool, error) {
 			return strings.TrimSpace(origin) != "", nil
 		}
 	}
-	e.Use(middleware.CORSWithConfig(corsConfig))
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+	return config
+}
+
+func (s *Server) requestLoggerConfig() middleware.RequestLoggerConfig {
+	return middleware.RequestLoggerConfig{
 		LogStatus:    true,
 		LogURI:       true,
 		LogMethod:    true,
@@ -330,7 +383,10 @@ func (s *Server) Start(ctx context.Context) error {
 				Msg("http request")
 			return nil
 		},
-	}))
+	}
+}
+
+func registerRoutes(e *echo.Echo, s *Server) {
 	e.GET("/", func(c echo.Context) error {
 		return success(c, map[string]any{
 			"service": "scoop-api",
@@ -372,32 +428,15 @@ func (s *Server) Start(ctx context.Context) error {
 	protected.POST("/articles/:article_uuid/person-identities", s.handleAddArticlePersonIdentity)
 	protected.DELETE("/articles/:article_uuid/person-identities/:person_identity", s.handleRemoveArticlePersonIdentity)
 	protected.GET("/articles/:story_article_uuid/preview", s.handleStoryArticlePreview)
+}
 
-	addr := fmt.Sprintf("%s:%d", s.opts.Host, s.opts.Port)
-	httpServer := &http.Server{
-		Addr:         addr,
-		Handler:      e,
-		ReadTimeout:  s.opts.ReadTimeout,
-		WriteTimeout: s.opts.WriteTimeout,
-		IdleTimeout:  60 * time.Second,
+func (s *Server) shutdownEchoWhenDone(ctx context.Context, e *echo.Echo) {
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.opts.ShutdownTimeout)
+	defer cancel()
+	if shutdownErr := e.Shutdown(shutdownCtx); shutdownErr != nil {
+		s.logger.Error().Err(shutdownErr).Msg("server shutdown failed")
 	}
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.opts.ShutdownTimeout)
-		defer cancel()
-		if shutdownErr := e.Shutdown(shutdownCtx); shutdownErr != nil {
-			s.logger.Error().Err(shutdownErr).Msg("server shutdown failed")
-		}
-	}()
-
-	s.logger.Info().Str("addr", addr).Msg("scoop web server started")
-
-	if err := e.StartServer(httpServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("start server: %w", err)
-	}
-	s.logger.Info().Msg("scoop web server stopped")
-	return nil
 }
 
 func (s *Server) httpErrorHandler(err error, c echo.Context) {
@@ -405,35 +444,43 @@ func (s *Server) httpErrorHandler(err error, c echo.Context) {
 		return
 	}
 
-	status := http.StatusInternalServerError
-	message := "Internal server error"
-	if he, ok := err.(*echo.HTTPError); ok {
-		status = he.Code
-		switch v := he.Message.(type) {
-		case string:
-			if strings.TrimSpace(v) != "" {
-				message = v
-			}
-		default:
-			if text := strings.TrimSpace(http.StatusText(status)); text != "" {
-				message = text
-			}
-		}
-	} else if err != nil {
-		message = err.Error()
-	}
-
-	isAPI := strings.HasPrefix(c.Request().URL.Path, "/api/")
-	if isAPI {
-		if status >= 500 {
-			_ = internalError(c, "Internal server error")
-			return
-		}
-		_ = fail(c, status, message, nil)
+	status, message := httpErrorStatusAndMessage(err)
+	if strings.HasPrefix(c.Request().URL.Path, "/api/") {
+		writeAPIError(c, status, message)
 		return
 	}
 
 	_ = c.String(status, message)
+}
+
+func httpErrorStatusAndMessage(err error) (int, string) {
+	status := http.StatusInternalServerError
+	message := "Internal server error"
+	if he, ok := err.(*echo.HTTPError); ok {
+		status = he.Code
+		message = echoHTTPErrorMessage(he, status, message)
+	} else if err != nil {
+		message = err.Error()
+	}
+	return status, message
+}
+
+func echoHTTPErrorMessage(he *echo.HTTPError, status int, fallback string) string {
+	if message, ok := he.Message.(string); ok && strings.TrimSpace(message) != "" {
+		return message
+	}
+	if text := strings.TrimSpace(http.StatusText(status)); text != "" {
+		return text
+	}
+	return fallback
+}
+
+func writeAPIError(c echo.Context, status int, message string) {
+	if status >= 500 {
+		_ = internalError(c, "Internal server error")
+		return
+	}
+	_ = fail(c, status, message, nil)
 }
 
 func (s *Server) handleHealth(c echo.Context) error {
@@ -520,44 +567,9 @@ func (s *Server) handleStoryDays(c echo.Context) error {
 }
 
 func (s *Server) handleStories(c echo.Context) error {
-	page, err := parsePositiveInt(c.QueryParam("page"), 1, 1, 1_000_000)
+	filter, err := parseStoryListFilter(c)
 	if err != nil {
-		return failValidation(c, map[string]string{"page": err.Error()})
-	}
-
-	pageSize, err := parsePositiveInt(c.QueryParam("page_size"), defaultPageSize, 1, maxPageSize)
-	if err != nil {
-		return failValidation(c, map[string]string{"page_size": err.Error()})
-	}
-
-	location, timeZone, err := parseClientTimeZone(c.QueryParam("tz"))
-	if err != nil {
-		return failValidation(c, map[string]string{"tz": "must be a valid IANA timezone"})
-	}
-
-	from, err := parseTimeFilter(c.QueryParam("from"), false, location)
-	if err != nil {
-		return failValidation(c, map[string]string{"from": "must be RFC3339 or YYYY-MM-DD"})
-	}
-	to, err := parseTimeFilter(c.QueryParam("to"), true, location)
-	if err != nil {
-		return failValidation(c, map[string]string{"to": "must be RFC3339 or YYYY-MM-DD"})
-	}
-	if from != nil && to != nil && from.After(*to) {
-		return failValidation(c, map[string]string{"time_range": "from must be <= to"})
-	}
-
-	filter := storyListFilter{
-		Collection: normalizeCollection(c.QueryParam("collection")),
-		Status:     strings.TrimSpace(strings.ToLower(c.QueryParam("status"))),
-		Query:      strings.TrimSpace(c.QueryParam("q")),
-		Tag:        db.NormalizeTagSlug(c.QueryParam("tag")),
-		From:       from,
-		To:         to,
-		TimeZone:   timeZone,
-		Lang:       normalizeLanguage(c.QueryParam("lang")),
-		Page:       page,
-		PageSize:   pageSize,
+		return err
 	}
 
 	total, rows, err := s.queryStoryList(c.Request().Context(), filter)
@@ -566,16 +578,74 @@ func (s *Server) handleStories(c echo.Context) error {
 		return internalError(c, "Failed to load stories")
 	}
 
-	totalPages := 0
-	if total > 0 {
-		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	return success(c, storyListResponse(filter, total, rows))
+}
+
+func parseStoryListFilter(c echo.Context) (storyListFilter, error) {
+	page, err := parsePositiveInt(c.QueryParam("page"), 1, 1, 1_000_000)
+	if err != nil {
+		return storyListFilter{}, failValidation(c, map[string]string{"page": err.Error()})
 	}
 
-	return success(c, map[string]any{
+	pageSize, err := parsePositiveInt(c.QueryParam("page_size"), defaultPageSize, 1, maxPageSize)
+	if err != nil {
+		return storyListFilter{}, failValidation(c, map[string]string{"page_size": err.Error()})
+	}
+
+	timeFilter, err := parseStoryListTimeFilter(c)
+	if err != nil {
+		return storyListFilter{}, err
+	}
+
+	return storyListFilter{
+		Collection: normalizeCollection(c.QueryParam("collection")),
+		Status:     strings.TrimSpace(strings.ToLower(c.QueryParam("status"))),
+		Query:      strings.TrimSpace(c.QueryParam("q")),
+		Tag:        db.NormalizeTagSlug(c.QueryParam("tag")),
+		From:       timeFilter.from,
+		To:         timeFilter.to,
+		TimeZone:   timeFilter.timeZone,
+		Lang:       normalizeLanguage(c.QueryParam("lang")),
+		Page:       page,
+		PageSize:   pageSize,
+	}, nil
+}
+
+type storyListTimeFilter struct {
+	from     *time.Time
+	to       *time.Time
+	timeZone string
+}
+
+func parseStoryListTimeFilter(c echo.Context) (storyListTimeFilter, error) {
+	location, timeZone, err := parseClientTimeZone(c.QueryParam("tz"))
+	if err != nil {
+		return storyListTimeFilter{}, failValidation(c, map[string]string{"tz": "must be a valid IANA timezone"})
+	}
+	from, err := parseTimeFilter(c.QueryParam("from"), false, location)
+	if err != nil {
+		return storyListTimeFilter{}, failValidation(c, map[string]string{"from": "must be RFC3339 or YYYY-MM-DD"})
+	}
+	to, err := parseTimeFilter(c.QueryParam("to"), true, location)
+	if err != nil {
+		return storyListTimeFilter{}, failValidation(c, map[string]string{"to": "must be RFC3339 or YYYY-MM-DD"})
+	}
+	if from != nil && to != nil && from.After(*to) {
+		return storyListTimeFilter{}, failValidation(c, map[string]string{"time_range": "from must be <= to"})
+	}
+	return storyListTimeFilter{from: from, to: to, timeZone: timeZone}, nil
+}
+
+func storyListResponse(filter storyListFilter, total int64, rows []storyListItem) map[string]any {
+	totalPages := 0
+	if total > 0 && filter.PageSize > 0 {
+		totalPages = int((total + int64(filter.PageSize) - 1) / int64(filter.PageSize))
+	}
+	return map[string]any{
 		"items": rows,
 		"pagination": map[string]any{
-			"page":        page,
-			"page_size":   pageSize,
+			"page":        filter.Page,
+			"page_size":   filter.PageSize,
 			"total_items": total,
 			"total_pages": totalPages,
 		},
@@ -589,7 +659,7 @@ func (s *Server) handleStories(c echo.Context) error {
 			"tz":         filter.TimeZone,
 			"lang":       filter.Lang,
 		},
-	})
+	}
 }
 
 func (s *Server) handleStoryDetail(c echo.Context) error {
@@ -617,69 +687,96 @@ func (s *Server) handleTranslate(c echo.Context) error {
 		return internalError(c, "Translation service is not initialized")
 	}
 
-	var req translateRequest
-	if err := decodeJSONBody(c, &req); err != nil {
-		return failValidation(c, map[string]string{"body": err.Error()})
+	cfg, responseErr := decodeTranslateRequest(c)
+	if responseErr != nil {
+		return responseErr
 	}
 
-	targetLang := normalizeLanguage(req.TargetLang)
-	if targetLang == "" {
-		return failValidation(c, map[string]string{"target_lang": "is required"})
-	}
-
-	storyUUID := strings.TrimSpace(derefString(req.StoryUUID))
-	articleUUID := strings.TrimSpace(derefString(req.ArticleUUID))
-	if storyUUID == "" && articleUUID == "" {
-		return failValidation(c, map[string]string{"body": "either story_uuid or article_uuid is required"})
-	}
-	if storyUUID != "" && articleUUID != "" {
-		return failValidation(c, map[string]string{"body": "only one of story_uuid or article_uuid is allowed"})
-	}
-
-	provider := strings.TrimSpace(req.Provider)
-	runOpts := translation.RunOptions{
-		TargetLang: targetLang,
-		Provider:   provider,
-	}
-
-	var (
-		stats translation.RunStats
-		err   error
-	)
-	switch {
-	case storyUUID != "":
-		stats, err = s.translationService.TranslateStoryByUUID(c.Request().Context(), storyUUID, runOpts)
-	case articleUUID != "":
-		stats, err = s.translationService.TranslateArticleByUUID(c.Request().Context(), articleUUID, runOpts)
-	}
+	stats, err := s.runTranslateRequest(c.Request().Context(), cfg)
 	if err != nil {
-		switch {
-		case errors.Is(err, translation.ErrStoryNotFound):
-			return failNotFound(c, "Story not found")
-		case errors.Is(err, translation.ErrArticleNotFound):
-			return failNotFound(c, "Article not found")
-		case errors.Is(err, translation.ErrTranslationDisabled):
-			return failValidation(c, map[string]string{"collection": "translation is disabled for this collection"})
-		case strings.Contains(strings.ToLower(err.Error()), "provider") && strings.Contains(strings.ToLower(err.Error()), "not registered"):
-			return failValidation(c, map[string]string{"provider": err.Error()})
-		default:
-			s.logger.Error().Err(err).Msg("translate request failed")
-			return internalError(c, "Failed to translate")
-		}
+		return s.handleTranslateError(c, err)
 	}
 
-	resolvedProvider := provider
+	resolvedProvider := cfg.provider
 	if resolvedProvider == "" {
 		resolvedProvider = s.translationService.DefaultProvider()
 	}
 
 	return success(c, map[string]any{
-		"story_uuid":   nullableString(storyUUID),
-		"article_uuid": nullableString(articleUUID),
-		"target_lang":  targetLang,
+		"story_uuid":   nullableString(cfg.storyUUID),
+		"article_uuid": nullableString(cfg.articleUUID),
+		"target_lang":  cfg.targetLang,
 		"provider":     resolvedProvider,
 		"stats":        stats,
 	})
+}
+
+func decodeTranslateRequest(c echo.Context) (translateRequestConfig, error) {
+	var req translateRequest
+	if err := decodeJSONBody(c, &req); err != nil {
+		return translateRequestConfig{}, failValidation(c, map[string]string{"body": err.Error()})
+	}
+
+	targetLang := normalizeLanguage(req.TargetLang)
+	if targetLang == "" {
+		return translateRequestConfig{}, failValidation(c, map[string]string{"target_lang": "is required"})
+	}
+
+	storyUUID := strings.TrimSpace(derefString(req.StoryUUID))
+	articleUUID := strings.TrimSpace(derefString(req.ArticleUUID))
+	if storyUUID == "" && articleUUID == "" {
+		return translateRequestConfig{}, failValidation(c, map[string]string{"body": "either story_uuid or article_uuid is required"})
+	}
+	if storyUUID != "" && articleUUID != "" {
+		return translateRequestConfig{}, failValidation(c, map[string]string{"body": "only one of story_uuid or article_uuid is allowed"})
+	}
+
+	provider := strings.TrimSpace(req.Provider)
+	return translateRequestConfig{
+		storyUUID:   storyUUID,
+		articleUUID: articleUUID,
+		targetLang:  targetLang,
+		provider:    provider,
+		runOpts: translation.RunOptions{
+			TargetLang: targetLang,
+			Provider:   provider,
+		},
+	}, nil
+}
+
+func (s *Server) runTranslateRequest(ctx context.Context, cfg translateRequestConfig) (translation.RunStats, error) {
+	if cfg.storyUUID != "" {
+		return s.translationService.TranslateStoryByUUID(ctx, cfg.storyUUID, cfg.runOpts)
+	}
+	return s.translationService.TranslateArticleByUUID(ctx, cfg.articleUUID, cfg.runOpts)
+}
+
+func (s *Server) handleTranslateError(c echo.Context, err error) error {
+	if response := translateRequestError(c, err); response != nil {
+		return response
+	}
+	s.logger.Error().Err(err).Msg("translate request failed")
+	return internalError(c, "Failed to translate")
+}
+
+func translateRequestError(c echo.Context, err error) error {
+	switch {
+	case errors.Is(err, translation.ErrStoryNotFound):
+		return failNotFound(c, "Story not found")
+	case errors.Is(err, translation.ErrArticleNotFound):
+		return failNotFound(c, "Article not found")
+	case errors.Is(err, translation.ErrTranslationDisabled):
+		return failValidation(c, map[string]string{"collection": "translation is disabled for this collection"})
+	case providerNotRegisteredError(err):
+		return failValidation(c, map[string]string{"provider": err.Error()})
+	default:
+		return nil
+	}
+}
+
+func providerNotRegisteredError(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "provider") && strings.Contains(message, "not registered")
 }
 
 func (s *Server) handleStoryTranslations(c echo.Context) error {
@@ -711,193 +808,251 @@ func (s *Server) handleStoryTranslations(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteStory(c echo.Context) error {
-	storyUUID := strings.TrimSpace(c.Param("story_uuid"))
-	if storyUUID == "" {
-		return failValidation(c, map[string]string{"story_uuid": "is required"})
-	}
-
-	affected, err := s.pool.SoftDeleteStory(c.Request().Context(), storyUUID, globaltime.UTC())
-	if err != nil {
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"story_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("soft delete story failed")
-		return internalError(c, "Failed to soft delete story")
-	}
-	if affected == 0 {
-		return failNotFound(c, "Story not found")
-	}
-
-	return success(c, map[string]any{
-		"story_uuid": storyUUID,
-		"affected":   affected,
-	})
+	return s.handleTimestampedEntityMutation(c, storyEntityMutationConfig("soft delete story failed", "Failed to soft delete story", s.pool.SoftDeleteStory))
 }
 
 func (s *Server) handleRestoreStory(c echo.Context) error {
-	storyUUID := strings.TrimSpace(c.Param("story_uuid"))
-	if storyUUID == "" {
-		return failValidation(c, map[string]string{"story_uuid": "is required"})
-	}
-
-	affected, err := s.pool.RestoreStory(c.Request().Context(), storyUUID, globaltime.UTC())
-	if err != nil {
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"story_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("restore story failed")
-		return internalError(c, "Failed to restore story")
-	}
-	if affected == 0 {
-		return failNotFound(c, "Story not found")
-	}
-
-	return success(c, map[string]any{
-		"story_uuid": storyUUID,
-		"affected":   affected,
-	})
+	return s.handleTimestampedEntityMutation(c, storyEntityMutationConfig("restore story failed", "Failed to restore story", s.pool.RestoreStory))
 }
 
 func (s *Server) handleUpdateStory(c echo.Context) error {
-	storyUUID := strings.TrimSpace(c.Param("story_uuid"))
-	if storyUUID == "" {
-		return failValidation(c, map[string]string{"story_uuid": "is required"})
-	}
+	cfg := entityUpdateConfig[db.UpdateStoryOptions, updatedStory]{responseKey: "story"}
+	cfg.decode = decodeUpdateStoryRequest
+	cfg.apply = s.pool.UpdateStory
+	cfg.load = s.loadUpdatedStoryResponse
+	cfg.error = storyMutationErrorConfig()
+	return handleEntityUpdate(s, c, cfg)
+}
 
-	var req updateStoryRequest
-	if err := decodeJSONBody(c, &req); err != nil {
-		return failValidation(c, map[string]string{"body": err.Error()})
-	}
+func decodeUpdateStoryRequest(c echo.Context) (string, db.UpdateStoryOptions, error) {
+	return decodeEntityUpdateRequest(c, "story_uuid", storyUpdateOptionsFromRequest, storyUpdateHasFields)
+}
 
-	opts := db.UpdateStoryOptions{
-		Title:      req.Title,
-		Status:     req.Status,
-		Collection: req.Collection,
-		URL:        req.URL,
-	}
-	if opts.Title == nil && opts.Status == nil && opts.Collection == nil && opts.URL == nil {
-		return failValidation(c, map[string]string{"body": "at least one update field is required"})
-	}
+func storyUpdateOptionsFromRequest(req updateStoryRequest) db.UpdateStoryOptions {
+	return db.UpdateStoryOptions{Title: req.Title, Status: req.Status, Collection: req.Collection, URL: req.URL}
+}
 
-	if err := s.pool.UpdateStory(c.Request().Context(), storyUUID, opts, globaltime.UTC()); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Story not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"body": msg})
-		}
-		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("update story failed")
-		return internalError(c, "Failed to update story")
-	}
-
-	row, err := s.queryUpdatedStory(c.Request().Context(), storyUUID)
-	if err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Story not found")
-		}
-		s.logger.Error().Err(err).Str("story_uuid", storyUUID).Msg("query updated story failed")
-		return internalError(c, "Failed to load updated story")
-	}
-	return success(c, map[string]any{"story": row})
+func storyUpdateHasFields(opts db.UpdateStoryOptions) bool {
+	return opts.Title != nil || opts.Status != nil || opts.Collection != nil || opts.URL != nil
 }
 
 func (s *Server) handleDeleteArticle(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
-	}
-
-	affected, err := s.pool.SoftDeleteArticle(c.Request().Context(), articleUUID, globaltime.UTC())
-	if err != nil {
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"article_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Msg("soft delete article failed")
-		return internalError(c, "Failed to soft delete article")
-	}
-	if affected == 0 {
-		return failNotFound(c, "Article not found")
-	}
-
-	return success(c, map[string]any{
-		"article_uuid": articleUUID,
-		"affected":     affected,
-	})
+	return s.handleTimestampedEntityMutation(c, articleEntityMutationConfig("soft delete article failed", "Failed to soft delete article", s.pool.SoftDeleteArticle))
 }
 
 func (s *Server) handleRestoreArticle(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
+	return s.handleTimestampedEntityMutation(c, articleEntityMutationConfig("restore article failed", "Failed to restore article", s.pool.RestoreArticle))
+}
+
+type entityMutationConfig struct {
+	paramName     string
+	responseKey   string
+	notFound      string
+	logMessage    string
+	clientMessage string
+	mutate        func(context.Context, string, time.Time) (int64, error)
+}
+
+func storyEntityMutationConfig(logMessage string, clientMessage string, mutate func(context.Context, string, time.Time) (int64, error)) entityMutationConfig {
+	cfg := entityMutationConfig{paramName: "story_uuid", responseKey: "story_uuid", notFound: "Story not found"}
+	cfg.logMessage = logMessage
+	cfg.clientMessage = clientMessage
+	cfg.mutate = mutate
+	return cfg
+}
+
+func articleEntityMutationConfig(logMessage string, clientMessage string, mutate func(context.Context, string, time.Time) (int64, error)) entityMutationConfig {
+	return entityMutationConfig{
+		paramName:     "article_uuid",
+		responseKey:   "article_uuid",
+		notFound:      "Article not found",
+		logMessage:    logMessage,
+		clientMessage: clientMessage,
+		mutate:        mutate,
+	}
+}
+
+func (s *Server) handleTimestampedEntityMutation(c echo.Context, cfg entityMutationConfig) error {
+	value := strings.TrimSpace(c.Param(cfg.paramName))
+	if value == "" {
+		return failValidation(c, map[string]string{cfg.paramName: "is required"})
 	}
 
-	affected, err := s.pool.RestoreArticle(c.Request().Context(), articleUUID, globaltime.UTC())
+	affected, err := cfg.mutate(c.Request().Context(), value, globaltime.UTC())
 	if err != nil {
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"article_uuid": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Msg("restore article failed")
-		return internalError(c, "Failed to restore article")
+		return s.handleTimestampedEntityMutationError(c, cfg, value, err)
 	}
 	if affected == 0 {
-		return failNotFound(c, "Article not found")
+		return failNotFound(c, cfg.notFound)
 	}
 
 	return success(c, map[string]any{
-		"article_uuid": articleUUID,
-		"affected":     affected,
+		cfg.responseKey: value,
+		"affected":      affected,
 	})
 }
 
+func (s *Server) handleTimestampedEntityMutationError(c echo.Context, cfg entityMutationConfig, value string, err error) error {
+	if msg := mutationValidationMessage(err); msg != "" {
+		return failValidation(c, map[string]string{cfg.paramName: msg})
+	}
+	s.logger.Error().Err(err).Str(cfg.paramName, value).Msg(cfg.logMessage)
+	return internalError(c, cfg.clientMessage)
+}
+
 func (s *Server) handleUpdateArticle(c echo.Context) error {
-	articleUUID := strings.TrimSpace(c.Param("article_uuid"))
-	if articleUUID == "" {
-		return failValidation(c, map[string]string{"article_uuid": "is required"})
-	}
+	return handleEntityUpdate(s, c, entityUpdateConfig[db.UpdateArticleOptions, updatedArticle]{
+		responseKey: "article",
+		decode:      decodeUpdateArticleRequest,
+		apply:       s.pool.UpdateArticle,
+		load:        s.loadUpdatedArticleResponse,
+		error:       articleMutationErrorConfig(),
+	})
+}
 
-	var req updateArticleRequest
+func decodeUpdateArticleRequest(c echo.Context) (string, db.UpdateArticleOptions, error) {
+	return decodeEntityUpdateRequest(c, "article_uuid", articleUpdateOptionsFromRequest, articleUpdateHasFields)
+}
+
+func articleUpdateOptionsFromRequest(req updateArticleRequest) db.UpdateArticleOptions {
+	return db.UpdateArticleOptions{Title: req.Title, Source: req.Source, Collection: req.Collection, URL: req.URL}
+}
+
+func articleUpdateHasFields(opts db.UpdateArticleOptions) bool {
+	return opts.Title != nil || opts.Source != nil || opts.Collection != nil || opts.URL != nil
+}
+
+func decodeEntityUpdateRequest[Request any, Options any](
+	c echo.Context,
+	paramName string,
+	buildOptions func(Request) Options,
+	hasFields func(Options) bool,
+) (string, Options, error) {
+	uuid := strings.TrimSpace(c.Param(paramName))
+	if uuid == "" {
+		var zero Options
+		return "", zero, failValidation(c, map[string]string{paramName: "is required"})
+	}
+	var req Request
 	if err := decodeJSONBody(c, &req); err != nil {
-		return failValidation(c, map[string]string{"body": err.Error()})
+		var zero Options
+		return "", zero, failValidation(c, map[string]string{"body": err.Error()})
 	}
+	opts := buildOptions(req)
+	if !hasFields(opts) {
+		var zero Options
+		return "", zero, failValidation(c, map[string]string{"body": "at least one update field is required"})
+	}
+	return uuid, opts, nil
+}
 
-	opts := db.UpdateArticleOptions{
-		Title:      req.Title,
-		Source:     req.Source,
-		Collection: req.Collection,
-		URL:        req.URL,
-	}
-	if opts.Title == nil && opts.Source == nil && opts.Collection == nil && opts.URL == nil {
-		return failValidation(c, map[string]string{"body": "at least one update field is required"})
-	}
+type entityUpdateConfig[Options any, Row any] struct {
+	responseKey string
+	decode      func(echo.Context) (string, Options, error)
+	apply       func(context.Context, string, Options, time.Time) error
+	load        func(echo.Context, string) (*Row, error)
+	error       mutationErrorConfig
+}
 
-	if err := s.pool.UpdateArticle(c.Request().Context(), articleUUID, opts, globaltime.UTC()); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article not found")
-		}
-		if msg := mutationValidationMessage(err); msg != "" {
-			return failValidation(c, map[string]string{"body": msg})
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Msg("update article failed")
-		return internalError(c, "Failed to update article")
-	}
+type mutationErrorConfig struct {
+	notFound      string
+	logField      string
+	logMessage    string
+	clientMessage string
+}
 
-	row, err := s.queryUpdatedArticle(c.Request().Context(), articleUUID)
+func handleEntityUpdate[Options any, Row any](s *Server, c echo.Context, cfg entityUpdateConfig[Options, Row]) error {
+	uuid, opts, err := cfg.decode(c)
 	if err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return failNotFound(c, "Article not found")
-		}
-		s.logger.Error().Err(err).Str("article_uuid", articleUUID).Msg("query updated article failed")
-		return internalError(c, "Failed to load updated article")
+		return err
 	}
-	return success(c, map[string]any{"article": row})
+	if err := cfg.apply(c.Request().Context(), uuid, opts, globaltime.UTC()); err != nil {
+		return s.handleMutationError(c, err, uuid, cfg.error)
+	}
+	row, err := cfg.load(c, uuid)
+	if err != nil {
+		return err
+	}
+	return success(c, map[string]any{cfg.responseKey: row})
+}
+
+func storyMutationErrorConfig() mutationErrorConfig {
+	return newMutationErrorConfig("Story", "story_uuid", "update story failed", "Failed to update story")
+}
+
+func articleMutationErrorConfig() mutationErrorConfig {
+	return newMutationErrorConfig("Article", "article_uuid", "update article failed", "Failed to update article")
+}
+
+func newMutationErrorConfig(noun string, logField string, logMessage string, clientMessage string) mutationErrorConfig {
+	return mutationErrorConfig{
+		notFound:      noun + " not found",
+		logField:      logField,
+		logMessage:    logMessage,
+		clientMessage: clientMessage,
+	}
+}
+
+func (s *Server) handleMutationError(c echo.Context, err error, uuid string, cfg mutationErrorConfig) error {
+	if errors.Is(err, db.ErrNoRows) {
+		return failNotFound(c, cfg.notFound)
+	}
+	if msg := mutationValidationMessage(err); msg != "" {
+		return failValidation(c, map[string]string{"body": msg})
+	}
+	s.logger.Error().Err(err).Str(cfg.logField, uuid).Msg(cfg.logMessage)
+	return internalError(c, cfg.clientMessage)
+}
+
+func (s *Server) loadUpdatedStoryResponse(c echo.Context, storyUUID string) (*updatedStory, error) {
+	return loadUpdatedEntityResponse(s, c, storyUUID, s.queryUpdatedStory, updatedStoryLoadConfig())
+}
+
+func (s *Server) loadUpdatedArticleResponse(c echo.Context, articleUUID string) (*updatedArticle, error) {
+	return loadUpdatedEntityResponse(s, c, articleUUID, s.queryUpdatedArticle, updatedArticleLoadConfig())
+}
+
+type updatedEntityLoadConfig struct {
+	notFound      string
+	logField      string
+	logMessage    string
+	clientMessage string
+}
+
+func updatedStoryLoadConfig() updatedEntityLoadConfig {
+	cfg := updatedEntityLoadConfig{notFound: "Story not found"}
+	cfg.logField = "story_uuid"
+	cfg.logMessage = "query updated story failed"
+	cfg.clientMessage = "Failed to load updated story"
+	return cfg
+}
+
+func updatedArticleLoadConfig() updatedEntityLoadConfig {
+	cfg := updatedEntityLoadConfig{notFound: "Article not found", logField: "article_uuid"}
+	cfg.logMessage = "query updated article failed"
+	cfg.clientMessage = "Failed to load updated article"
+	return cfg
+}
+
+func loadUpdatedEntityResponse[Row any](
+	s *Server,
+	c echo.Context,
+	uuid string,
+	query func(context.Context, string) (*Row, error),
+	cfg updatedEntityLoadConfig,
+) (*Row, error) {
+	row, err := query(c.Request().Context(), uuid)
+	if err == nil {
+		return row, nil
+	}
+	if errors.Is(err, db.ErrNoRows) {
+		return nil, failNotFound(c, cfg.notFound)
+	}
+	s.logger.Error().Err(err).Str(cfg.logField, uuid).Msg(cfg.logMessage)
+	return nil, internalError(c, cfg.clientMessage)
 }
 
 func (s *Server) queryStoryList(ctx context.Context, filter storyListFilter) (int64, []storyListItem, error) {
-	search := ""
-	if strings.TrimSpace(filter.Query) != "" {
-		search = "%" + strings.TrimSpace(filter.Query) + "%"
-	}
-
 	const countQuery = `
 WITH story_publish_times AS (
 	SELECT
@@ -937,7 +1092,7 @@ WHERE s.deleted_at IS NULL
 `
 
 	var total int64
-	if err := s.pool.QueryRow(ctx, countQuery, filter.Collection, filter.Status, search, filter.From, filter.To, filter.Tag).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countQuery, storyListQueryArgs(filter)...).Scan(&total); err != nil {
 		return 0, nil, fmt.Errorf("count stories: %w", err)
 	}
 
@@ -1041,93 +1196,121 @@ LIMIT $8
 OFFSET $9
 `
 
-	rows, err := s.pool.Query(
-		ctx,
-		rowsQuery,
-		filter.Collection,
-		filter.Status,
-		search,
-		filter.From,
-		filter.To,
-		filter.Tag,
-		filter.Lang,
-		filter.PageSize,
-		offset,
-	)
+	rows, err := s.pool.Query(ctx, rowsQuery, storyListRowsQueryArgs(filter, offset)...)
 	if err != nil {
 		return 0, nil, fmt.Errorf("query stories: %w", err)
 	}
 	defer rows.Close()
 
+	items, storyIDs, err := scanStoryListRows(rows, filter)
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := s.hydrateStoryListItems(ctx, items, storyIDs); err != nil {
+		return 0, nil, err
+	}
+	return total, items, nil
+}
+
+func storyListQueryArgs(filter storyListFilter) []any {
+	return []any{filter.Collection, filter.Status, storyListSearchPattern(filter.Query), filter.From, filter.To, filter.Tag}
+}
+
+func storyListRowsQueryArgs(filter storyListFilter, offset int) []any {
+	args := storyListQueryArgs(filter)
+	return append(args, filter.Lang, filter.PageSize, offset)
+}
+
+func storyListSearchPattern(query string) string {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return ""
+	}
+	return "%" + trimmed + "%"
+}
+
+func scanStoryListRows(rows *db.Rows, filter storyListFilter) ([]storyListItem, []int64, error) {
 	items := make([]storyListItem, 0, filter.PageSize)
 	storyIDs := make([]int64, 0, filter.PageSize)
 	for rows.Next() {
-		var (
-			row             storyListItem
-			repArticleUUID  *string
-			repSource       *string
-			repSourceItemID *string
-			repPublishedAt  *time.Time
-		)
-		if err := rows.Scan(
-			&row.StoryID,
-			&row.StoryUUID,
-			&row.Collection,
-			&row.TranslationMode,
-			&row.OriginalTitle,
-			&row.TranslatedTitle,
-			&row.CanonicalURL,
-			&row.Status,
-			&row.PublishedAt,
-			&row.FirstSeenAt,
-			&row.LastSeenAt,
-			&row.SourceCount,
-			&row.ArticleCount,
-			&row.DetectedLanguage,
-			&repArticleUUID,
-			&repSource,
-			&repSourceItemID,
-			&repPublishedAt,
-		); err != nil {
-			return 0, nil, fmt.Errorf("scan story row: %w", err)
-		}
-
-		row.TranslationMode = db.NormalizeCollectionTranslationMode(row.TranslationMode)
-		if repArticleUUID != nil && repSource != nil && repSourceItemID != nil {
-			row.Representative = &storyRepresentative{
-				ArticleUUID:  *repArticleUUID,
-				Source:       *repSource,
-				SourceItemID: *repSourceItemID,
-				PublishedAt:  repPublishedAt,
-			}
-		}
-
-		row.Title = row.OriginalTitle
-		if filter.Lang != "" && row.TranslatedTitle != nil {
-			row.Title = *row.TranslatedTitle
+		row, err := scanStoryListRow(rows, filter.Lang)
+		if err != nil {
+			return nil, nil, err
 		}
 		storyIDs = append(storyIDs, row.StoryID)
 		items = append(items, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return 0, nil, fmt.Errorf("iterate story rows: %w", err)
+		return nil, nil, fmt.Errorf("iterate story rows: %w", err)
 	}
+	return items, storyIDs, nil
+}
 
+func scanStoryListRow(rows *db.Rows, lang string) (storyListItem, error) {
+	var (
+		row             storyListItem
+		repArticleUUID  *string
+		repSource       *string
+		repSourceItemID *string
+		repPublishedAt  *time.Time
+	)
+	if err := rows.Scan(
+		&row.StoryID,
+		&row.StoryUUID,
+		&row.Collection,
+		&row.TranslationMode,
+		&row.OriginalTitle,
+		&row.TranslatedTitle,
+		&row.CanonicalURL,
+		&row.Status,
+		&row.PublishedAt,
+		&row.FirstSeenAt,
+		&row.LastSeenAt,
+		&row.SourceCount,
+		&row.ArticleCount,
+		&row.DetectedLanguage,
+		&repArticleUUID,
+		&repSource,
+		&repSourceItemID,
+		&repPublishedAt,
+	); err != nil {
+		return storyListItem{}, fmt.Errorf("scan story row: %w", err)
+	}
+	row.TranslationMode = db.NormalizeCollectionTranslationMode(row.TranslationMode)
+	row.Representative = storyRepresentativeFromRow(repArticleUUID, repSource, repSourceItemID, repPublishedAt)
+	row.Title = displayStoryListTitle(row, lang)
+	return row, nil
+}
+
+func storyRepresentativeFromRow(articleUUID, source, sourceItemID *string, publishedAt *time.Time) *storyRepresentative {
+	if articleUUID == nil || source == nil || sourceItemID == nil {
+		return nil
+	}
+	return &storyRepresentative{ArticleUUID: *articleUUID, Source: *source, SourceItemID: *sourceItemID, PublishedAt: publishedAt}
+}
+
+func displayStoryListTitle(row storyListItem, lang string) string {
+	if lang != "" && row.TranslatedTitle != nil {
+		return *row.TranslatedTitle
+	}
+	return row.OriginalTitle
+}
+
+func (s *Server) hydrateStoryListItems(ctx context.Context, items []storyListItem, storyIDs []int64) error {
 	tagsByStoryID, err := s.pool.ListTagsForStoryIDs(ctx, storyIDs)
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
 	personIdentitiesByStoryID, err := s.pool.ListPersonIdentitiesForStoryIDs(ctx, storyIDs)
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
 	for idx := range items {
 		items[idx].Tags = tagsByStoryID[items[idx].StoryID]
 		items[idx].PersonIdentities = personIdentitiesByStoryID[items[idx].StoryID]
 	}
-
-	return total, items, nil
+	return nil
 }
 
 func (s *Server) queryUpdatedStory(ctx context.Context, storyUUID string) (*updatedStory, error) {
@@ -1197,124 +1380,9 @@ LIMIT 1
 }
 
 func (s *Server) queryStoryDetail(ctx context.Context, storyUUID string, lang string) (*storyDetail, error) {
-	const storyQuery = `
-SELECT
-	s.story_id,
-	s.story_uuid::text,
-	s.collection,
-	COALESCE(
-		cs.translation_mode,
-		CASE
-			WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
-			ELSE 'disabled'
-		END
-	) AS translation_mode,
-	s.canonical_title AS original_title,
-	st.translated_text,
-	s.canonical_url,
-	s.status,
-	spt.story_published_at,
-	s.first_seen_at,
-	s.last_seen_at,
-	(SELECT COUNT(DISTINCT a.source)
-	 FROM news.story_articles sa
-	 JOIN news.articles a
-		ON a.article_id = sa.article_id
-		AND a.deleted_at IS NULL
-	 WHERE sa.story_id = s.story_id) AS source_count,
-	(SELECT COUNT(*)
-	 FROM news.story_articles sa
-	 JOIN news.articles a
-		ON a.article_id = sa.article_id
-		AND a.deleted_at IS NULL
-	 WHERE sa.story_id = s.story_id) AS article_count,
-	COALESCE(rd.normalized_language, 'und') AS detected_language,
-	rd.article_uuid::text,
-	rd.source,
-	rd.source_item_id,
-	rd.published_at
-FROM news.stories s
-LEFT JOIN LATERAL (
-	SELECT MAX(a.published_at) AS story_published_at
-	FROM news.story_articles sa
-	JOIN news.articles a
-		ON a.article_id = sa.article_id
-		AND a.deleted_at IS NULL
-		AND a.published_at IS NOT NULL
-	WHERE sa.story_id = s.story_id
-) spt ON TRUE
-LEFT JOIN news.articles rd
-	ON rd.article_id = s.representative_article_id
-	AND rd.deleted_at IS NULL
-LEFT JOIN news.collection_settings cs
-	ON cs.collection = s.collection
-LEFT JOIN LATERAL (
-	SELECT tr.translated_text
-	FROM news.translation_sources ts
-	JOIN news.translation_results tr
-		ON tr.translation_source_id = ts.translation_source_id
-	WHERE ts.source_type = 'story_title'
-		AND ts.source_id = s.story_id
-		AND tr.target_lang = $2
-		AND COALESCE(
-			cs.translation_mode,
-			CASE
-				WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
-				ELSE 'disabled'
-			END
-		) = 'enabled'
-	ORDER BY ts.captured_at DESC, ts.translation_source_id DESC
-	LIMIT 1
-) st ON TRUE
-WHERE s.story_uuid = $1::uuid
-  AND s.deleted_at IS NULL
-`
-
-	var (
-		story           storyListItem
-		repArticleUUID  *string
-		repSource       *string
-		repSourceItemID *string
-		repPublishedAt  *time.Time
-	)
-	if err := s.pool.QueryRow(ctx, storyQuery, storyUUID, lang).Scan(
-		&story.StoryID,
-		&story.StoryUUID,
-		&story.Collection,
-		&story.TranslationMode,
-		&story.OriginalTitle,
-		&story.TranslatedTitle,
-		&story.CanonicalURL,
-		&story.Status,
-		&story.PublishedAt,
-		&story.FirstSeenAt,
-		&story.LastSeenAt,
-		&story.SourceCount,
-		&story.ArticleCount,
-		&story.DetectedLanguage,
-		&repArticleUUID,
-		&repSource,
-		&repSourceItemID,
-		&repPublishedAt,
-	); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			return nil, errStoryNotFound
-		}
-		return nil, fmt.Errorf("query story: %w", err)
-	}
-	story.TranslationMode = db.NormalizeCollectionTranslationMode(story.TranslationMode)
-	story.Title = story.OriginalTitle
-	if lang != "" && story.TranslatedTitle != nil {
-		story.Title = *story.TranslatedTitle
-	}
-
-	if repArticleUUID != nil && repSource != nil && repSourceItemID != nil {
-		story.Representative = &storyRepresentative{
-			ArticleUUID:  *repArticleUUID,
-			Source:       *repSource,
-			SourceItemID: *repSourceItemID,
-			PublishedAt:  repPublishedAt,
-		}
+	story, err := s.queryStoryDetailStory(ctx, storyUUID, lang)
+	if err != nil {
+		return nil, err
 	}
 
 	const membersQuery = `
@@ -1403,91 +1471,265 @@ ORDER BY d.published_at DESC NULLS LAST, sm.matched_at DESC
 	}
 	defer rows.Close()
 
-	members := make([]StoryArticle, 0, story.ArticleCount)
-	articleUUIDs := make([]string, 0, story.ArticleCount)
-	for rows.Next() {
-		var (
-			member          StoryArticle
-			matchDetailsRaw []byte
-		)
-		if err := rows.Scan(
-			&member.StoryArticleUUID,
-			&member.ArticleUUID,
-			&member.Source,
-			&member.SourceItemID,
-			&member.Collection,
-			&member.TranslationMode,
-			&member.CanonicalURL,
-			&member.PublishedAt,
-			&member.NormalizedTitle,
-			&member.DetectedLanguage,
-			&member.TranslatedTitle,
-			&member.NormalizedText,
-			&member.TranslatedText,
-			&member.SourceDomain,
-			&member.MatchedAt,
-			&member.MatchType,
-			&member.MatchScore,
-			&matchDetailsRaw,
-			&member.DedupDecision,
-			&member.DedupExactSignal,
-			&member.DedupBestCosine,
-			&member.DedupTitleOverlap,
-			&member.DedupDateConsistency,
-			&member.DedupCompositeScore,
-		); err != nil {
-			return nil, fmt.Errorf("scan story article: %w", err)
-		}
-		member.TranslationMode = db.NormalizeCollectionTranslationMode(member.TranslationMode)
-		member.OriginalTitle = member.NormalizedTitle
-		member.OriginalText = member.NormalizedText
-		if lang != "" {
-			if member.TranslatedTitle != nil {
-				member.NormalizedTitle = *member.TranslatedTitle
-			}
-			if member.TranslatedText != nil {
-				member.NormalizedText = *member.TranslatedText
-			}
-		}
-
-		if len(matchDetailsRaw) > 0 && string(matchDetailsRaw) != "null" {
-			var details map[string]any
-			if err := json.Unmarshal(matchDetailsRaw, &details); err == nil {
-				member.MatchDetails = details
-			}
-		}
-
-		articleUUIDs = append(articleUUIDs, member.ArticleUUID)
-		members = append(members, member)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate story articles: %w", err)
-	}
-
-	tagsByArticleUUID, err := s.pool.ListTagsForArticleUUIDs(ctx, articleUUIDs)
+	members, articleUUIDs, err := scanStoryArticleMembers(rows, lang, story.ArticleCount)
 	if err != nil {
 		return nil, err
 	}
-	personIdentitiesByArticleUUID, err := s.pool.ListPersonIdentitiesForArticleUUIDs(ctx, articleUUIDs)
-	if err != nil {
-		return nil, err
-	}
-	for idx := range members {
-		members[idx].Tags = tagsByArticleUUID[members[idx].ArticleUUID]
-		members[idx].PersonIdentities = personIdentitiesByArticleUUID[members[idx].ArticleUUID]
-	}
 
-	personIdentitiesByStoryID, err := s.pool.ListPersonIdentitiesForStoryIDs(ctx, []int64{story.StoryID})
-	if err != nil {
+	if err := s.hydrateStoryDetailRelations(ctx, &story, members, articleUUIDs); err != nil {
 		return nil, err
 	}
-	story.PersonIdentities = personIdentitiesByStoryID[story.StoryID]
 
 	return &storyDetail{
 		Story:   story,
 		Members: members,
 	}, nil
+}
+
+func (s *Server) hydrateStoryDetailRelations(
+	ctx context.Context,
+	story *storyListItem,
+	members []StoryArticle,
+	articleUUIDs []string,
+) error {
+	tagsByArticleUUID, err := s.pool.ListTagsForArticleUUIDs(ctx, articleUUIDs)
+	if err != nil {
+		return err
+	}
+	personIdentitiesByArticleUUID, err := s.pool.ListPersonIdentitiesForArticleUUIDs(ctx, articleUUIDs)
+	if err != nil {
+		return err
+	}
+	for idx := range members {
+		members[idx].Tags = tagsByArticleUUID[members[idx].ArticleUUID]
+		members[idx].PersonIdentities = personIdentitiesByArticleUUID[members[idx].ArticleUUID]
+	}
+	personIdentitiesByStoryID, err := s.pool.ListPersonIdentitiesForStoryIDs(ctx, []int64{story.StoryID})
+	if err != nil {
+		return err
+	}
+	story.PersonIdentities = personIdentitiesByStoryID[story.StoryID]
+	return nil
+}
+
+func (s *Server) queryStoryDetailStory(ctx context.Context, storyUUID string, lang string) (storyListItem, error) {
+	const storyQuery = `
+SELECT
+	s.story_id,
+	s.story_uuid::text,
+	s.collection,
+	COALESCE(
+		cs.translation_mode,
+		CASE
+			WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+			ELSE 'disabled'
+		END
+	) AS translation_mode,
+	s.canonical_title AS original_title,
+	st.translated_text,
+	s.canonical_url,
+	s.status,
+	spt.story_published_at,
+	s.first_seen_at,
+	s.last_seen_at,
+	(SELECT COUNT(DISTINCT a.source)
+	 FROM news.story_articles sa
+	 JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+	 WHERE sa.story_id = s.story_id) AS source_count,
+	(SELECT COUNT(*)
+	 FROM news.story_articles sa
+	 JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+	 WHERE sa.story_id = s.story_id) AS article_count,
+	COALESCE(rd.normalized_language, 'und') AS detected_language,
+	rd.article_uuid::text,
+	rd.source,
+	rd.source_item_id,
+	rd.published_at
+FROM news.stories s
+LEFT JOIN LATERAL (
+	SELECT MAX(a.published_at) AS story_published_at
+	FROM news.story_articles sa
+	JOIN news.articles a
+		ON a.article_id = sa.article_id
+		AND a.deleted_at IS NULL
+		AND a.published_at IS NOT NULL
+	WHERE sa.story_id = s.story_id
+) spt ON TRUE
+LEFT JOIN news.articles rd
+	ON rd.article_id = s.representative_article_id
+	AND rd.deleted_at IS NULL
+LEFT JOIN news.collection_settings cs
+	ON cs.collection = s.collection
+LEFT JOIN LATERAL (
+	SELECT tr.translated_text
+	FROM news.translation_sources ts
+	JOIN news.translation_results tr
+		ON tr.translation_source_id = ts.translation_source_id
+	WHERE ts.source_type = 'story_title'
+		AND ts.source_id = s.story_id
+		AND tr.target_lang = $2
+		AND COALESCE(
+			cs.translation_mode,
+			CASE
+				WHEN s.collection IN ('china_news', 'metal_news') THEN 'enabled'
+				ELSE 'disabled'
+			END
+		) = 'enabled'
+	ORDER BY ts.captured_at DESC, ts.translation_source_id DESC
+	LIMIT 1
+) st ON TRUE
+WHERE s.story_uuid = $1::uuid
+  AND s.deleted_at IS NULL
+`
+	story, rep, err := s.scanStoryDetailStory(ctx, storyQuery, storyUUID, lang)
+	if err != nil {
+		return storyListItem{}, err
+	}
+	return normalizeStoryDetailStory(story, rep, lang), nil
+}
+
+type storyRepresentativeScan struct {
+	articleUUID  *string
+	source       *string
+	sourceItemID *string
+	publishedAt  *time.Time
+}
+
+func (s *Server) scanStoryDetailStory(
+	ctx context.Context,
+	query string,
+	storyUUID string,
+	lang string,
+) (storyListItem, storyRepresentativeScan, error) {
+	var story storyListItem
+	var rep storyRepresentativeScan
+	if err := s.pool.QueryRow(ctx, query, storyUUID, lang).Scan(
+		&story.StoryID,
+		&story.StoryUUID,
+		&story.Collection,
+		&story.TranslationMode,
+		&story.OriginalTitle,
+		&story.TranslatedTitle,
+		&story.CanonicalURL,
+		&story.Status,
+		&story.PublishedAt,
+		&story.FirstSeenAt,
+		&story.LastSeenAt,
+		&story.SourceCount,
+		&story.ArticleCount,
+		&story.DetectedLanguage,
+		&rep.articleUUID,
+		&rep.source,
+		&rep.sourceItemID,
+		&rep.publishedAt,
+	); err != nil {
+		if errors.Is(err, db.ErrNoRows) {
+			return storyListItem{}, storyRepresentativeScan{}, errStoryNotFound
+		}
+		return storyListItem{}, storyRepresentativeScan{}, fmt.Errorf("query story: %w", err)
+	}
+	return story, rep, nil
+}
+
+func normalizeStoryDetailStory(story storyListItem, rep storyRepresentativeScan, lang string) storyListItem {
+	story.TranslationMode = db.NormalizeCollectionTranslationMode(story.TranslationMode)
+	story.Title = story.OriginalTitle
+	if lang != "" && story.TranslatedTitle != nil {
+		story.Title = *story.TranslatedTitle
+	}
+	if rep.articleUUID != nil && rep.source != nil && rep.sourceItemID != nil {
+		story.Representative = &storyRepresentative{
+			ArticleUUID:  *rep.articleUUID,
+			Source:       *rep.source,
+			SourceItemID: *rep.sourceItemID,
+			PublishedAt:  rep.publishedAt,
+		}
+	}
+	return story
+}
+
+func scanStoryArticleMembers(rows *db.Rows, lang string, articleCount int) ([]StoryArticle, []string, error) {
+	members := make([]StoryArticle, 0, articleCount)
+	articleUUIDs := make([]string, 0, articleCount)
+	for rows.Next() {
+		member, err := scanStoryArticleMember(rows, lang)
+		if err != nil {
+			return nil, nil, err
+		}
+		articleUUIDs = append(articleUUIDs, member.ArticleUUID)
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate story articles: %w", err)
+	}
+	return members, articleUUIDs, nil
+}
+
+func scanStoryArticleMember(rows *db.Rows, lang string) (StoryArticle, error) {
+	var (
+		member          StoryArticle
+		matchDetailsRaw []byte
+	)
+	if err := rows.Scan(
+		&member.StoryArticleUUID,
+		&member.ArticleUUID,
+		&member.Source,
+		&member.SourceItemID,
+		&member.Collection,
+		&member.TranslationMode,
+		&member.CanonicalURL,
+		&member.PublishedAt,
+		&member.NormalizedTitle,
+		&member.DetectedLanguage,
+		&member.TranslatedTitle,
+		&member.NormalizedText,
+		&member.TranslatedText,
+		&member.SourceDomain,
+		&member.MatchedAt,
+		&member.MatchType,
+		&member.MatchScore,
+		&matchDetailsRaw,
+		&member.DedupDecision,
+		&member.DedupExactSignal,
+		&member.DedupBestCosine,
+		&member.DedupTitleOverlap,
+		&member.DedupDateConsistency,
+		&member.DedupCompositeScore,
+	); err != nil {
+		return StoryArticle{}, fmt.Errorf("scan story article: %w", err)
+	}
+	return normalizeStoryArticleMember(member, matchDetailsRaw, lang), nil
+}
+
+func normalizeStoryArticleMember(member StoryArticle, matchDetailsRaw []byte, lang string) StoryArticle {
+	member.TranslationMode = db.NormalizeCollectionTranslationMode(member.TranslationMode)
+	member.OriginalTitle = member.NormalizedTitle
+	member.OriginalText = member.NormalizedText
+	if lang != "" {
+		if member.TranslatedTitle != nil {
+			member.NormalizedTitle = *member.TranslatedTitle
+		}
+		if member.TranslatedText != nil {
+			member.NormalizedText = *member.TranslatedText
+		}
+	}
+	member.MatchDetails = decodeMatchDetails(matchDetailsRaw)
+	return member
+}
+
+func decodeMatchDetails(raw []byte) map[string]any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var details map[string]any
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return nil
+	}
+	return details
 }
 
 func (s *Server) queryCollections(ctx context.Context) ([]collectionSummary, error) {
@@ -1674,10 +1916,10 @@ func normalizeLanguage(raw string) string {
 
 func nullableString(value string) *string {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return nil
+	if len(trimmed) > 0 {
+		return &trimmed
 	}
-	return &trimmed
+	return nil
 }
 
 func decodeJSONBody(c echo.Context, dst any) error {

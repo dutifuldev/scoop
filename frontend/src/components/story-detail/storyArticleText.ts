@@ -27,7 +27,10 @@ function truncateRunes(value: string, maxChars: number): string {
     return value;
   }
 
-  return `${runes.slice(0, maxChars - truncationSuffix.length).join("").trimEnd()}${truncationSuffix}`;
+  return `${runes
+    .slice(0, maxChars - truncationSuffix.length)
+    .join("")
+    .trimEnd()}${truncationSuffix}`;
 }
 
 export function truncateArticleTextBlocks(

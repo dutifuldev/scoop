@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -17,31 +18,52 @@ var trackingQueryKeys = map[string]struct{}{
 }
 
 func URL(raw string) (canonical string, host string) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", ""
-	}
-
-	parsed, err := url.Parse(trimmed)
+	parsed, err := parseAbsoluteURL(raw)
 	if err != nil {
 		return "", ""
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", ""
-	}
 
+	normalizeURLSchemeAndHost(parsed)
+	normalizeURLPath(parsed)
+	normalizeURLQuery(parsed)
+
+	parsed.Fragment = ""
+	return parsed.String(), parsed.Hostname()
+}
+
+func parseAbsoluteURL(raw string) (*url.URL, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, fmt.Errorf("url is empty")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("url must be absolute")
+	}
+	return parsed, nil
+}
+
+func normalizeURLSchemeAndHost(parsed *url.URL) {
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	hostname := strings.ToLower(parsed.Hostname())
 	port := parsed.Port()
 	parsed.Host = hostname
-	if port != "" {
-		defaultPort := (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443")
-		if !defaultPort {
-			parsed.Host = hostname + ":" + port
-		}
+	if shouldKeepURLPort(parsed.Scheme, port) {
+		parsed.Host = hostname + ":" + port
 	}
+}
 
-	parsed.Fragment = ""
+func shouldKeepURLPort(scheme string, port string) bool {
+	if port == "" {
+		return false
+	}
+	return (scheme != "http" || port != "80") && (scheme != "https" || port != "443")
+}
+
+func normalizeURLPath(parsed *url.URL) {
 	path := strings.TrimSpace(parsed.EscapedPath())
 	if path == "" {
 		path = "/"
@@ -52,21 +74,25 @@ func URL(raw string) (canonical string, host string) {
 	}
 	parsed.Path = path
 	parsed.RawPath = ""
+}
 
+func normalizeURLQuery(parsed *url.URL) {
 	q := parsed.Query()
 	for key := range q {
-		lower := strings.ToLower(key)
-		if strings.HasPrefix(lower, "utm_") {
-			q.Del(key)
-			continue
-		}
-		if _, ok := trackingQueryKeys[lower]; ok {
+		if isTrackingQueryKey(key) {
 			q.Del(key)
 		}
 	}
 	parsed.RawQuery = sortedQuery(q)
+}
 
-	return parsed.String(), parsed.Hostname()
+func isTrackingQueryKey(key string) bool {
+	lower := strings.ToLower(key)
+	if strings.HasPrefix(lower, "utm_") {
+		return true
+	}
+	_, ok := trackingQueryKeys[lower]
+	return ok
 }
 
 func Text(input string) string {

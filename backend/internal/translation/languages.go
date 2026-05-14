@@ -56,24 +56,25 @@ func ViewerLanguageOptions(registry *Registry) []LanguageOption {
 }
 
 func TranslationLanguageOptions(registry *Registry) []LanguageOption {
+	codes := supportedTranslationCodes(registry)
+	options := make([]LanguageOption, 0, len(codes))
+	for _, code := range codes {
+		options = append(options, languageOptionForCode(code))
+	}
+	return options
+}
+
+func supportedTranslationCodes(registry *Registry) []string {
 	supported := map[string]struct{}{}
 
 	for code := range translationLanguageLabels {
-		normalized := normalizeLangCode(code)
-		if normalized == "" {
-			continue
-		}
-		supported[normalized] = struct{}{}
+		addSupportedLanguageCode(supported, code)
 	}
 
 	if registry != nil {
 		for _, provider := range registry.providers {
 			for _, code := range provider.SupportedLanguages() {
-				normalized := normalizeLangCode(code)
-				if normalized == "" {
-					continue
-				}
-				supported[normalized] = struct{}{}
+				addSupportedLanguageCode(supported, code)
 			}
 		}
 	}
@@ -83,24 +84,27 @@ func TranslationLanguageOptions(registry *Registry) []LanguageOption {
 		codes = append(codes, code)
 	}
 	sort.Strings(codes)
+	return codes
+}
 
-	options := make([]LanguageOption, 0, len(codes))
-	for _, code := range codes {
-		labels, hasLabels := translationLanguageLabels[code]
-		if hasLabels {
-			options = append(options, LanguageOption{
-				Code:   code,
-				Label:  labels.english,
-				Native: labels.chinese,
-			})
-			continue
-		}
-
-		options = append(options, LanguageOption{
-			Code:  code,
-			Label: strings.ToUpper(code),
-		})
+func addSupportedLanguageCode(supported map[string]struct{}, code string) {
+	normalized := normalizeLangCode(code)
+	if normalized != "" {
+		supported[normalized] = struct{}{}
 	}
+}
 
-	return options
+func languageOptionForCode(code string) LanguageOption {
+	labels, hasLabels := translationLanguageLabels[code]
+	if hasLabels {
+		return LanguageOption{
+			Code:   code,
+			Label:  labels.english,
+			Native: labels.chinese,
+		}
+	}
+	return LanguageOption{
+		Code:  code,
+		Label: strings.ToUpper(code),
+	}
 }

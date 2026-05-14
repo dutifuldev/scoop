@@ -1,23 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-maximum_score="${GO_CRAP_MAX_SCORE:-30}"
+maximum_score="${GO_CRAP_MAX_SCORE:-8}"
 if [[ -n "${GO_CRAP_FILTERS:-}" ]]; then
   # shellcheck disable=SC2206
   filters=(${GO_CRAP_FILTERS})
 else
-  filters=(
-    internal/auth
-    internal/cli
-    internal/config
-    internal/globaltime
-    internal/langdetect
-    internal/language
-    internal/logging
-    internal/normalize
-    internal/reader
-    schema
-  )
+  filters=()
 fi
 
 go run github.com/unclebob/crap4go/cmd/crap4go@latest "${filters[@]}" | awk -v maximum="$maximum_score" '

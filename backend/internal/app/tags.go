@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,43 +14,32 @@ import (
 )
 
 func runTags(args []string) int {
-	if len(args) == 0 {
-		printTagsUsage()
-		return 2
-	}
-
-	switch args[0] {
-	case "list":
-		return runTagsList(args[1:])
-	case "create":
-		return runTagsCreate(args[1:])
-	case "rename":
-		return runTagsRename(args[1:])
-	case "update":
-		return runTagsUpdate(args[1:])
-	case "archive":
-		return runTagsArchive(args[1:], true)
-	case "unarchive":
-		return runTagsArchive(args[1:], false)
-	case "delete":
-		return runTagsDelete(args[1:])
-	case "add-article":
-		return runTagsAddArticle(args[1:])
-	case "remove-article":
-		return runTagsRemoveArticle(args[1:])
-	case "help", "--help", "-h":
-		printTagsUsage()
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "unknown tags command: %s\n\n", args[0])
-		printTagsUsage()
-		return 2
-	}
+	return runSubcommands("tags", args, []subcommand{
+		{names: []string{"list"}, run: runTagsList},
+		{names: []string{"create"}, run: runTagsCreate},
+		{names: []string{"rename"}, run: runTagsRename},
+		{names: []string{"update"}, run: runTagsUpdate},
+		{names: []string{"archive"}, run: func(args []string) int { return runTagsArchive(args, true) }},
+		{names: []string{"unarchive"}, run: func(args []string) int { return runTagsArchive(args, false) }},
+		{names: []string{"delete"}, run: runTagsDelete},
+		{names: []string{"add-article"}, run: runTagsAddArticle},
+		{names: []string{"remove-article"}, run: runTagsRemoveArticle},
+	}, printTagsUsage, nil)
 }
 
 func runTagsList(args []string) int {
-	fs := flag.NewFlagSet("tags list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	return runParsedCommand(args, parseTagsListCommand, executeTagsListCommand)
+}
+
+type tagsListCommandConfig struct {
+	envLoader       *cli.EnvLoader
+	timeout         time.Duration
+	format          string
+	includeArchived bool
+}
+
+func parseTagsListCommand(args []string) (tagsListCommandConfig, int, bool) {
+	fs := newAppFlagSet("tags list")
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
@@ -57,20 +47,29 @@ func runTagsList(args []string) int {
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return tagsListCommandConfig{}, 0, false
 		}
-		return 2
+		return tagsListCommandConfig{}, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "tags list does not accept positional arguments")
-		return 2
+		return tagsListCommandConfig{}, 2, false
 	}
 	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+		return tagsListCommandConfig{}, 2, false
 	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	return tagsListCommandConfig{
+		envLoader:       envLoader,
+		timeout:         *timeout,
+		format:          outputFormat,
+		includeArchived: *includeArchived,
+	}, 0, true
+}
+
+func executeTagsListCommand(cfg tagsListCommandConfig) int {
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -78,11 +77,15 @@ func runTagsList(args []string) int {
 	defer cancel()
 	defer pool.Close()
 
-	tags, err := pool.ListTags(ctx, *includeArchived)
+	tags, err := pool.ListTags(ctx, cfg.includeArchived)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to list tags: %v\n", err)
 		return 1
 	}
+	return renderTagsList(tags, cfg.format)
+}
+
+func renderTagsList(tags []db.TagRecord, outputFormat string) int {
 	if outputFormat == outputFormatJSON {
 		if err := printJSON(tags); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
@@ -109,14 +112,24 @@ func runTagsList(args []string) int {
 }
 
 func runTagsCreate(args []string) int {
+	return runParsedCommand(args, parseTagsCreateCommand, executeTagsCreateCommand)
+}
+
+type tagsCreateCommandConfig struct {
+	envLoader *cli.EnvLoader
+	timeout   time.Duration
+	format    string
+	opts      db.UpsertTagOptions
+}
+
+func parseTagsCreateCommand(args []string) (tagsCreateCommandConfig, int, bool) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "tag is required")
-		return 2
+		return tagsCreateCommandConfig{}, 2, false
 	}
 	slug := args[0]
 
-	fs := flag.NewFlagSet("tags create", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newAppFlagSet("tags create")
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
@@ -125,19 +138,34 @@ func runTagsCreate(args []string) int {
 	highlightColor := fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return 0
+			return tagsCreateCommandConfig{}, 0, false
 		}
-		return 2
+		return tagsCreateCommandConfig{}, 2, false
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "tags create accepts only one tag")
-		return 2
+		return tagsCreateCommandConfig{}, 2, false
 	}
-	if _, err := parseOutputFormat(*format, outputFormatTable); err != nil {
+	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
+		return tagsCreateCommandConfig{}, 2, false
 	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	return tagsCreateCommandConfig{
+		envLoader: envLoader,
+		timeout:   *timeout,
+		format:    outputFormat,
+		opts: db.UpsertTagOptions{
+			Slug:           slug,
+			Description:    stringPtrFromFlag(description),
+			Color:          stringPtrFromFlag(color),
+			HighlightColor: stringPtrFromFlag(highlightColor),
+		},
+	}, 0, true
+}
+
+func executeTagsCreateCommand(cfg tagsCreateCommandConfig) int {
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -145,29 +173,19 @@ func runTagsCreate(args []string) int {
 	defer cancel()
 	defer pool.Close()
 
-	var descriptionPtr *string
-	if *description != "" {
-		descriptionPtr = description
-	}
-	var colorPtr *string
-	if *color != "" {
-		colorPtr = color
-	}
-	var highlightColorPtr *string
-	if *highlightColor != "" {
-		highlightColorPtr = highlightColor
-	}
-	tag, err := pool.CreateTag(ctx, db.UpsertTagOptions{
-		Slug:           slug,
-		Description:    descriptionPtr,
-		Color:          colorPtr,
-		HighlightColor: highlightColorPtr,
-	}, globaltime.UTC())
+	tag, err := pool.CreateTag(ctx, cfg.opts, globaltime.UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create tag: %v\n", err)
 		return 1
 	}
-	return printTagResult(tag, *format)
+	return printTagResult(tag, cfg.format)
+}
+
+func stringPtrFromFlag(value *string) *string {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return value
 }
 
 func runTagsRename(args []string) int {
@@ -175,8 +193,7 @@ func runTagsRename(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: scoop tags rename <old-tag> <new-tag>")
 		return 2
 	}
-	fs := flag.NewFlagSet("tags rename", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newAppFlagSet("tags rename")
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
@@ -194,13 +211,11 @@ func runTagsRename(args []string) int {
 }
 
 func runTagsUpdate(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag is required")
-		return 2
+	slug, exitCode, ok := parseRequiredTagSlugArg(args)
+	if !ok {
+		return exitCode
 	}
-	slug := args[0]
-	fs := flag.NewFlagSet("tags update", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newAppFlagSet("tags update")
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
@@ -213,6 +228,22 @@ func runTagsUpdate(args []string) int {
 		}
 		return 2
 	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "too many positional arguments")
+		return 2
+	}
+	return updateTag(slug, tagUpdateOptionsFromFlags(description, color, highlightColor), *timeout, envLoader, *format)
+}
+
+func parseRequiredTagSlugArg(args []string) (string, int, bool) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "tag is required")
+		return "", 2, false
+	}
+	return args[0], 0, true
+}
+
+func tagUpdateOptionsFromFlags(description *string, color *string, highlightColor *string) db.UpdateTagOptions {
 	opts := db.UpdateTagOptions{}
 	if *description != "" {
 		opts.Description = description
@@ -223,11 +254,7 @@ func runTagsUpdate(args []string) int {
 	if *highlightColor != "" {
 		opts.HighlightColor = highlightColor
 	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	return updateTag(slug, opts, *timeout, envLoader, *format)
+	return opts
 }
 
 func updateTag(slug string, opts db.UpdateTagOptions, timeout time.Duration, envLoader *cli.EnvLoader, format string) int {
@@ -256,31 +283,11 @@ func updateTag(slug string, opts db.UpdateTagOptions, timeout time.Duration, env
 }
 
 func runTagsArchive(args []string, archived bool) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "tag is required")
-		return 2
+	cfg, exitCode, ok := parseSingleTagCommand(args, "tags archive", true)
+	if !ok {
+		return exitCode
 	}
-	slug := args[0]
-	fs := flag.NewFlagSet("tags archive", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	if err := fs.Parse(args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	if _, err := parseOutputFormat(*format, outputFormatTable); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
-		return 2
-	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -288,7 +295,7 @@ func runTagsArchive(args []string, archived bool) int {
 	defer cancel()
 	defer pool.Close()
 
-	tag, err := pool.SetTagArchived(ctx, slug, archived, globaltime.UTC())
+	tag, err := pool.SetTagArchived(ctx, cfg.slug, archived, globaltime.UTC())
 	if err != nil {
 		if errors.Is(err, db.ErrNoRows) {
 			fmt.Fprintln(os.Stderr, "Tag not found")
@@ -297,7 +304,44 @@ func runTagsArchive(args []string, archived bool) int {
 		fmt.Fprintf(os.Stderr, "Failed to update tag: %v\n", err)
 		return 1
 	}
-	return printTagResult(tag, *format)
+	return printTagResult(tag, cfg.format)
+}
+
+type singleTagCommandConfig struct {
+	envLoader *cli.EnvLoader
+	timeout   time.Duration
+	format    string
+	slug      string
+}
+
+func parseSingleTagCommand(args []string, name string, hasFormat bool) (singleTagCommandConfig, int, bool) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "tag is required")
+		return singleTagCommandConfig{}, 2, false
+	}
+	fs := newAppFlagSet(name)
+	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
+	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
+	format := outputFormatTable
+	if hasFormat {
+		fs.StringVar(&format, "format", outputFormatTable, "Output format: table or json")
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return singleTagCommandConfig{}, 0, false
+		}
+		return singleTagCommandConfig{}, 2, false
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "too many positional arguments")
+		return singleTagCommandConfig{}, 2, false
+	}
+	outputFormat, err := parseOutputFormat(format, outputFormatTable)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
+		return singleTagCommandConfig{}, 2, false
+	}
+	return singleTagCommandConfig{envLoader: envLoader, timeout: *timeout, format: outputFormat, slug: args[0]}, 0, true
 }
 
 func runTagsDelete(args []string) int {
@@ -306,37 +350,28 @@ func runTagsDelete(args []string) int {
 		return 2
 	}
 	slug := args[0]
-	fs := flag.NewFlagSet("tags delete", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs := newAppFlagSet("tags delete")
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	if err := fs.Parse(args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	if exitCode, ok := parseAppFlagSet(fs, args[1:]); !ok {
+		return exitCode
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "too many positional arguments")
 		return 2
 	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	defer cancel()
-	defer pool.Close()
-	if err := pool.DeleteTag(ctx, slug); err != nil {
-		if errors.Is(err, db.ErrNoRows) {
-			fmt.Fprintln(os.Stderr, "Tag not found")
+	return runWithReadPool(*timeout, envLoader, func(ctx context.Context, pool *db.Pool) int {
+		if err := pool.DeleteTag(ctx, slug); err != nil {
+			if errors.Is(err, db.ErrNoRows) {
+				fmt.Fprintln(os.Stderr, "Tag not found")
+				return 1
+			}
+			fmt.Fprintf(os.Stderr, "Failed to delete tag: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(os.Stderr, "Failed to delete tag: %v\n", err)
-		return 1
-	}
-	fmt.Printf("deleted tag %s\n", db.NormalizeTagSlug(slug))
-	return 0
+		fmt.Printf("deleted tag %s\n", db.NormalizeTagSlug(slug))
+		return 0
+	})
 }
 
 func runTagsAddArticle(args []string) int {
@@ -348,27 +383,11 @@ func runTagsRemoveArticle(args []string) int {
 }
 
 func runTagsArticleMutation(args []string, add bool) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: scoop tags add-article <article_uuid> <tag>")
-		return 2
+	cfg, exitCode, ok := parseArticleValueCommand(args, "tags article", "usage: scoop tags add-article <article_uuid> <tag>", false)
+	if !ok {
+		return exitCode
 	}
-	articleUUID := args[0]
-	slug := args[1]
-	fs := flag.NewFlagSet("tags article", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	if err := fs.Parse(args[2:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	ctx, cancel, pool, err := connectReadPool(*timeout, envLoader)
+	ctx, cancel, pool, err := connectReadPool(cfg.timeout, cfg.envLoader)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -376,9 +395,9 @@ func runTagsArticleMutation(args []string, add bool) int {
 	defer cancel()
 	defer pool.Close()
 	if add {
-		err = pool.AddArticleTag(ctx, articleUUID, slug, nil, globaltime.UTC())
+		err = pool.AddArticleTag(ctx, cfg.articleUUID, cfg.value, nil, globaltime.UTC())
 	} else {
-		err = pool.RemoveArticleTag(ctx, articleUUID, slug, nil)
+		err = pool.RemoveArticleTag(ctx, cfg.articleUUID, cfg.value, nil)
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrNoRows) {
@@ -392,7 +411,7 @@ func runTagsArticleMutation(args []string, add bool) int {
 	if !add {
 		action = "removed"
 	}
-	fmt.Printf("%s tag %s on article %s\n", action, db.NormalizeTagSlug(slug), articleUUID)
+	fmt.Printf("%s tag %s on article %s\n", action, db.NormalizeTagSlug(cfg.value), cfg.articleUUID)
 	return 0
 }
 

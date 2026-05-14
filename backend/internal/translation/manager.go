@@ -59,6 +59,21 @@ type RunStats struct {
 	Skipped    int `json:"skipped"`
 }
 
+type translationTaskOutcome int
+
+const (
+	translationTaskSkipped translationTaskOutcome = iota
+	translationTaskCached
+	translationTaskTranslated
+)
+
+type preparedTranslationTask struct {
+	task         translationTask
+	originalText string
+	contentHash  []byte
+	sourceLang   string
+}
+
 // CachedTranslation is a cached translation row enriched for API output.
 type CachedTranslation struct {
 	TranslationUUID string    `json:"translation_uuid"`
@@ -221,6 +236,13 @@ func (m *Manager) ListStoryTranslationsByUUID(ctx context.Context, storyUUID str
 		return nil, err
 	}
 
+	return m.cachedTranslationsForEnabledCollections(ctx, rows)
+}
+
+func (m *Manager) cachedTranslationsForEnabledCollections(
+	ctx context.Context,
+	rows []db.StoryTranslationRow,
+) ([]CachedTranslation, error) {
 	items := make([]CachedTranslation, 0, len(rows))
 	collectionEnabled := map[string]bool{}
 	for _, row := range rows {
@@ -231,23 +253,26 @@ func (m *Manager) ListStoryTranslationsByUUID(ctx context.Context, storyUUID str
 		if !enabled {
 			continue
 		}
-		items = append(items, CachedTranslation{
-			TranslationUUID: row.TranslationUUID,
-			SourceType:      row.SourceType,
-			SourceID:        row.SourceID,
-			SourceUUID:      row.SourceUUID,
-			SourceLang:      row.SourceLang,
-			TargetLang:      row.TargetLang,
-			OriginalText:    row.OriginalText,
-			TranslatedText:  row.TranslatedText,
-			ProviderName:    row.ProviderName,
-			ModelName:       row.ModelName,
-			LatencyMS:       row.LatencyMS,
-			CreatedAt:       row.CreatedAt,
-		})
+		items = append(items, cachedTranslationFromRow(row))
 	}
-
 	return items, nil
+}
+
+func cachedTranslationFromRow(row db.StoryTranslationRow) CachedTranslation {
+	return CachedTranslation{
+		TranslationUUID: row.TranslationUUID,
+		SourceType:      row.SourceType,
+		SourceID:        row.SourceID,
+		SourceUUID:      row.SourceUUID,
+		SourceLang:      row.SourceLang,
+		TargetLang:      row.TargetLang,
+		OriginalText:    row.OriginalText,
+		TranslatedText:  row.TranslatedText,
+		ProviderName:    row.ProviderName,
+		ModelName:       row.ModelName,
+		LatencyMS:       row.LatencyMS,
+		CreatedAt:       row.CreatedAt,
+	}
 }
 
 func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarget, opts RunOptions) (RunStats, error) {
@@ -313,115 +338,172 @@ func (m *Manager) runTasks(ctx context.Context, tasks []translationTask, opts Ru
 	stats := RunStats{}
 	for _, task := range tasks {
 		stats.Total++
-
-		originalText := strings.TrimSpace(task.OriginalText)
-		if originalText == "" {
-			stats.Skipped++
-			continue
-		}
-
-		contentHash := hashTranslationSourceText(originalText)
-		sourceLang := normalizeLangCode(task.SourceLang)
-		if sourceLang == "" {
-			sourceLang = "und"
-		}
-		if shouldSkipTranslationTask(sourceLang, targetLang) {
-			stats.Skipped++
-			continue
-		}
-
-		translationSourceID, err := m.upsertTranslationSource(ctx, upsertTranslationSourceInput{
-			SourceType:    task.SourceType,
-			SourceID:      task.SourceID,
-			SourceLang:    sourceLang,
-			ContentHash:   contentHash,
-			OriginalText:  originalText,
-			ContentOrigin: normalizeContentOrigin(task.ContentOrigin),
-		})
+		outcome, err := m.runTask(ctx, task, opts, targetLang, provider, providerName, modelName)
 		if err != nil {
 			return stats, err
 		}
-
-		cached, err := m.lookupCachedTranslation(ctx, translationSourceID, targetLang)
-		if err != nil {
-			return stats, err
-		}
-		if cached != nil && !opts.Force {
+		switch outcome {
+		case translationTaskCached:
 			stats.Cached++
-			continue
-		}
-
-		if opts.DryRun {
+		case translationTaskSkipped:
 			stats.Skipped++
-			continue
+		case translationTaskTranslated:
+			stats.Translated++
 		}
-
-		resp, err := provider.Translate(ctx, TranslateRequest{
-			Text:       originalText,
-			SourceLang: sourceLang,
-			TargetLang: targetLang,
-		})
-		if err != nil {
-			return stats, fmt.Errorf("translate %s source_id=%d: %w", task.SourceType, task.SourceID, err)
-		}
-
-		translatedText := strings.TrimSpace(resp.Text)
-		if translatedText == "" {
-			return stats, fmt.Errorf("translate %s source_id=%d: empty translation", task.SourceType, task.SourceID)
-		}
-
-		resolvedSourceLang := normalizeLangCode(resp.SourceLang)
-		if resolvedSourceLang == "" {
-			resolvedSourceLang = normalizeLangCode(task.SourceLang)
-		}
-		if resolvedSourceLang == "" {
-			resolvedSourceLang = "und"
-		}
-
-		resolvedTargetLang := normalizeLangCode(resp.TargetLang)
-		if resolvedTargetLang == "" {
-			resolvedTargetLang = targetLang
-		}
-
-		if resolvedSourceLang != sourceLang {
-			translationSourceID, err = m.upsertTranslationSource(ctx, upsertTranslationSourceInput{
-				SourceType:    task.SourceType,
-				SourceID:      task.SourceID,
-				SourceLang:    resolvedSourceLang,
-				ContentHash:   contentHash,
-				OriginalText:  originalText,
-				ContentOrigin: normalizeContentOrigin(task.ContentOrigin),
-			})
-			if err != nil {
-				return stats, err
-			}
-		}
-
-		resolvedProviderName := strings.TrimSpace(resp.ProviderName)
-		if resolvedProviderName == "" {
-			resolvedProviderName = providerName
-		}
-
-		latencyMS := int(resp.LatencyMs)
-		if latencyMS < 0 {
-			latencyMS = 0
-		}
-
-		if err := m.upsertTranslationResult(ctx, upsertTranslationResultInput{
-			TranslationSourceID: translationSourceID,
-			TargetLang:          resolvedTargetLang,
-			TranslatedText:      translatedText,
-			ProviderName:        resolvedProviderName,
-			ModelName:           modelName,
-			LatencyMS:           &latencyMS,
-		}); err != nil {
-			return stats, err
-		}
-
-		stats.Translated++
 	}
 
 	return stats, nil
+}
+
+func (m *Manager) runTask(
+	ctx context.Context,
+	task translationTask,
+	opts RunOptions,
+	targetLang string,
+	provider Provider,
+	providerName string,
+	modelName *string,
+) (translationTaskOutcome, error) {
+	prepared, ok := prepareTranslationTask(task, targetLang)
+	if !ok {
+		return translationTaskSkipped, nil
+	}
+	translationSourceID, err := m.upsertPreparedTranslationSource(ctx, prepared)
+	if err != nil {
+		return translationTaskSkipped, err
+	}
+	cached, err := m.lookupCachedTranslation(ctx, translationSourceID, targetLang)
+	if err != nil {
+		return translationTaskSkipped, err
+	}
+	if cached != nil && !opts.Force {
+		return translationTaskCached, nil
+	}
+	if opts.DryRun {
+		return translationTaskSkipped, nil
+	}
+	resp, err := translatePreparedTask(ctx, provider, prepared, targetLang)
+	if err != nil {
+		return translationTaskSkipped, err
+	}
+	return translationTaskTranslated, m.persistTranslatedTask(ctx, prepared, translationSourceID, resp, targetLang, providerName, modelName)
+}
+
+func prepareTranslationTask(task translationTask, targetLang string) (preparedTranslationTask, bool) {
+	originalText := strings.TrimSpace(task.OriginalText)
+	if originalText == "" {
+		return preparedTranslationTask{}, false
+	}
+	sourceLang := normalizeTaskSourceLang(task.SourceLang)
+	if shouldSkipTranslationTask(sourceLang, targetLang) {
+		return preparedTranslationTask{}, false
+	}
+	return preparedTranslationTask{
+		task:         task,
+		originalText: originalText,
+		contentHash:  hashTranslationSourceText(originalText),
+		sourceLang:   sourceLang,
+	}, true
+}
+
+func normalizeTaskSourceLang(raw string) string {
+	sourceLang := normalizeLangCode(raw)
+	if sourceLang == "" {
+		return "und"
+	}
+	return sourceLang
+}
+
+func (m *Manager) upsertPreparedTranslationSource(ctx context.Context, prepared preparedTranslationTask) (int64, error) {
+	return m.upsertTranslationSource(ctx, upsertTranslationSourceInput{
+		SourceType:    prepared.task.SourceType,
+		SourceID:      prepared.task.SourceID,
+		SourceLang:    prepared.sourceLang,
+		ContentHash:   prepared.contentHash,
+		OriginalText:  prepared.originalText,
+		ContentOrigin: normalizeContentOrigin(prepared.task.ContentOrigin),
+	})
+}
+
+func translatePreparedTask(
+	ctx context.Context,
+	provider Provider,
+	prepared preparedTranslationTask,
+	targetLang string,
+) (*TranslateResponse, error) {
+	resp, err := provider.Translate(ctx, TranslateRequest{
+		Text:       prepared.originalText,
+		SourceLang: prepared.sourceLang,
+		TargetLang: targetLang,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("translate %s source_id=%d: %w", prepared.task.SourceType, prepared.task.SourceID, err)
+	}
+	if strings.TrimSpace(resp.Text) == "" {
+		return nil, fmt.Errorf("translate %s source_id=%d: empty translation", prepared.task.SourceType, prepared.task.SourceID)
+	}
+	return resp, nil
+}
+
+func (m *Manager) persistTranslatedTask(
+	ctx context.Context,
+	prepared preparedTranslationTask,
+	translationSourceID int64,
+	resp *TranslateResponse,
+	targetLang string,
+	providerName string,
+	modelName *string,
+) error {
+	resolvedSourceLang := resolvedResponseSourceLang(resp.SourceLang, prepared.task.SourceLang)
+	if resolvedSourceLang != prepared.sourceLang {
+		var err error
+		translationSourceID, err = m.upsertPreparedTranslationSource(ctx, prepared.withSourceLang(resolvedSourceLang))
+		if err != nil {
+			return err
+		}
+	}
+	latencyMS := normalizedLatencyMS(resp.LatencyMs)
+	return m.upsertTranslationResult(ctx, upsertTranslationResultInput{
+		TranslationSourceID: translationSourceID,
+		TargetLang:          resolvedResponseTargetLang(resp.TargetLang, targetLang),
+		TranslatedText:      strings.TrimSpace(resp.Text),
+		ProviderName:        resolvedResponseProvider(resp.ProviderName, providerName),
+		ModelName:           modelName,
+		LatencyMS:           &latencyMS,
+	})
+}
+
+func (prepared preparedTranslationTask) withSourceLang(sourceLang string) preparedTranslationTask {
+	prepared.sourceLang = sourceLang
+	return prepared
+}
+
+func resolvedResponseSourceLang(responseLang, fallbackLang string) string {
+	if sourceLang := normalizeLangCode(responseLang); sourceLang != "" {
+		return sourceLang
+	}
+	return normalizeTaskSourceLang(fallbackLang)
+}
+
+func resolvedResponseTargetLang(responseLang, fallbackLang string) string {
+	if targetLang := normalizeLangCode(responseLang); targetLang != "" {
+		return targetLang
+	}
+	return fallbackLang
+}
+
+func resolvedResponseProvider(responseProvider, fallbackProvider string) string {
+	if provider := strings.TrimSpace(responseProvider); provider != "" {
+		return provider
+	}
+	return fallbackProvider
+}
+
+func normalizedLatencyMS(latency int64) int {
+	if latency < 0 {
+		return 0
+	}
+	return int(latency)
 }
 
 func (m *Manager) requireCollectionTranslationEnabled(ctx context.Context, collection string) error {
@@ -572,21 +654,12 @@ func (m *Manager) hydrateArticleTextForTranslation(
 		return nil
 	}
 
-	article.Title = strings.TrimSpace(article.Title)
-	article.Text = strings.TrimSpace(article.Text)
-	article.TextOrigin = ContentOriginNormalized
-
-	// If the text is substantive (longer than the title + some margin), use it as-is.
-	// Otherwise, treat it as empty and try reader fetch — during ingestion we often
-	// store the title as body_text, which is not useful for translation.
-	if article.Text != "" && len(article.Text) > len(article.Title)+50 {
+	normalizeArticleTranslationText(article)
+	if articleHasSubstantiveText(article) {
 		return nil
 	}
 
-	canonicalURL := ""
-	if article.CanonicalURL != nil {
-		canonicalURL = strings.TrimSpace(*article.CanonicalURL)
-	}
+	canonicalURL := articleCanonicalURL(article)
 	if canonicalURL == "" {
 		return nil
 	}
@@ -603,6 +676,25 @@ func (m *Manager) hydrateArticleTextForTranslation(
 		article.TextOrigin = ContentOriginReader
 	}
 	return nil
+}
+
+func normalizeArticleTranslationText(article *articleTranslationTarget) {
+	article.Title = strings.TrimSpace(article.Title)
+	article.Text = strings.TrimSpace(article.Text)
+	article.TextOrigin = ContentOriginNormalized
+}
+
+func articleHasSubstantiveText(article *articleTranslationTarget) bool {
+	// During ingestion, the body can be just the title. Treat only clearly longer
+	// text as enough for translation without reader hydration.
+	return article.Text != "" && len(article.Text) > len(article.Title)+50
+}
+
+func articleCanonicalURL(article *articleTranslationTarget) string {
+	if article.CanonicalURL == nil {
+		return ""
+	}
+	return strings.TrimSpace(*article.CanonicalURL)
 }
 
 func (m *Manager) lookupCachedTranslation(
@@ -721,12 +813,11 @@ func hashTranslationSourceText(text string) []byte {
 }
 
 func normalizeContentOrigin(origin string) string {
-	switch strings.ToLower(strings.TrimSpace(origin)) {
-	case ContentOriginReader:
+	normalized := strings.ToLower(strings.TrimSpace(origin))
+	if normalized == ContentOriginReader {
 		return ContentOriginReader
-	default:
-		return ContentOriginNormalized
 	}
+	return ContentOriginNormalized
 }
 
 func shouldSkipTranslationTask(sourceLang, targetLang string) bool {

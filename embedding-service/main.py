@@ -23,10 +23,11 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8844
@@ -105,7 +106,7 @@ class DeterministicBackend:
         values: list[float] = []
         counter = 0
         while len(values) < self.dimensions:
-            digest = hashlib.sha256(f"{text}\n{counter}".encode("utf-8")).digest()
+            digest = hashlib.sha256(f"{text}\n{counter}".encode()).digest()
             for idx in range(0, len(digest), 2):
                 pair = digest[idx : idx + 2]
                 if len(pair) < 2:
@@ -131,9 +132,9 @@ class TransformersBackend:
         self.model_name = model_name
         self.dtype = dtype
         self._lock = threading.Lock()
-        self._torch = None
-        self._tokenizer = None
-        self._model = None
+        self._torch: Any | None = None
+        self._tokenizer: Any | None = None
+        self._model: Any | None = None
         self.device = "cpu"
         self.dimensions = 0
         self._load_model()
@@ -198,7 +199,7 @@ class TransformersBackend:
                     last_token_indices,
                 ]
                 embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-            return embeddings.cpu().float().tolist()
+            return _coerce_embedding_vectors(embeddings.cpu().float().tolist())
 
     def health(self) -> dict[str, Any]:
         return {
@@ -236,6 +237,23 @@ def parse_input_texts(data: dict[str, Any], *, max_items: int) -> list[str]:
     if len(cleaned) > max_items:
         raise ValueError(f"too many texts: got {len(cleaned)}, max {max_items}")
     return cleaned
+
+
+def _coerce_embedding_vectors(value: Any) -> list[list[float]]:
+    if not isinstance(value, list):
+        raise RuntimeError("embedding backend returned a non-list payload")
+
+    vectors: list[list[float]] = []
+    for row_index, row in enumerate(value):
+        if not isinstance(row, list):
+            raise RuntimeError(f"embedding row {row_index} is not a list")
+        vector: list[float] = []
+        for column_index, item in enumerate(row):
+            if not isinstance(item, int | float):
+                raise RuntimeError(f"embedding value [{row_index}][{column_index}] is not numeric")
+            vector.append(float(item))
+        vectors.append(vector)
+    return vectors
 
 
 def parse_max_length(data: dict[str, Any], default_value: int) -> int:
@@ -302,10 +320,12 @@ def create_handler(state: ServiceState) -> type[BaseHTTPRequestHandler]:
             if len(vectors) > 0 and len(vectors[0]) != state.backend.dimensions:
                 self._write_error(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
-                    f"dimension mismatch: got {len(vectors[0])}, expected {state.backend.dimensions}",
+                    "dimension mismatch: "
+                    f"got {len(vectors[0])}, expected {state.backend.dimensions}",
                 )
                 return
 
+            payload: dict[str, Any]
             if self.path == "/v1/embeddings":
                 payload = {
                     "object": "list",
@@ -345,7 +365,8 @@ def create_handler(state: ServiceState) -> type[BaseHTTPRequestHandler]:
                 raise ValueError("empty request body")
             if content_length > state.settings.max_body_bytes:
                 raise ValueError(
-                    f"request body too large: {content_length} bytes (max {state.settings.max_body_bytes})"
+                    "request body too large: "
+                    f"{content_length} bytes (max {state.settings.max_body_bytes})"
                 )
             raw_body = self.rfile.read(content_length)
             decoded = json.loads(raw_body.decode("utf-8"))
@@ -380,7 +401,8 @@ def create_backend(settings: Settings) -> EmbeddingBackend:
 
     if backend.dimensions != PIPELINE_VECTOR_DIMENSIONS:
         raise RuntimeError(
-            f"backend dimension mismatch: got {backend.dimensions}, expected {PIPELINE_VECTOR_DIMENSIONS} "
+            "backend dimension mismatch: "
+            f"got {backend.dimensions}, expected {PIPELINE_VECTOR_DIMENSIONS} "
             "for scoop pgvector schema"
         )
     return backend
@@ -474,12 +496,32 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["transformers", "deterministic"],
         default=_env("EMBED_BACKEND", DEFAULT_BACKEND),
     )
-    parser.add_argument("--model", dest="model_name", default=_env("EMBED_MODEL_NAME", DEFAULT_MODEL_NAME))
+    parser.add_argument(
+        "--model",
+        dest="model_name",
+        default=_env("EMBED_MODEL_NAME", DEFAULT_MODEL_NAME),
+    )
     parser.add_argument("--model-key", default=_env("EMBED_MODEL_KEY", DEFAULT_MODEL_KEY))
-    parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"], default=_env("EMBED_DTYPE", DEFAULT_DTYPE))
-    parser.add_argument("--max-length", type=int, default=_env_int("EMBED_MAX_LENGTH", DEFAULT_MAX_LENGTH))
-    parser.add_argument("--max-items", type=int, default=_env_int("EMBED_MAX_ITEMS", DEFAULT_MAX_ITEMS))
-    parser.add_argument("--max-body-bytes", type=int, default=_env_int("EMBED_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES))
+    parser.add_argument(
+        "--dtype",
+        choices=["float16", "bfloat16", "float32"],
+        default=_env("EMBED_DTYPE", DEFAULT_DTYPE),
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=_env_int("EMBED_MAX_LENGTH", DEFAULT_MAX_LENGTH),
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=_env_int("EMBED_MAX_ITEMS", DEFAULT_MAX_ITEMS),
+    )
+    parser.add_argument(
+        "--max-body-bytes",
+        type=int,
+        default=_env_int("EMBED_MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES),
+    )
     parser.add_argument("--log-level", default=_env("EMBED_LOG_LEVEL", "INFO"))
     return parser
 

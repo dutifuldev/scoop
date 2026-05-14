@@ -36,6 +36,19 @@ type Request struct {
 	ResponseHeaders   json.RawMessage
 }
 
+type normalizedRequest struct {
+	source            string
+	sourceItemID      string
+	collection        string
+	sourceItemURL     *string
+	sourcePublishedAt *time.Time
+	rawPayload        string
+	payloadHash       [sha256.Size]byte
+	cursorCheckpoint  string
+	triggeredByTopic  *string
+	responseHeaders   *string
+}
+
 type Result struct {
 	RunID          int64
 	RunUUID        string
@@ -47,10 +60,9 @@ type Result struct {
 }
 
 func NewService(pool *db.Pool, logger zerolog.Logger) *Service {
-	return &Service{
-		pool:   pool,
-		logger: logger,
-	}
+	service := &Service{pool: pool}
+	service.logger = logger
+	return service
 }
 
 func (s *Service) IngestOne(ctx context.Context, req Request) (Result, error) {
@@ -58,74 +70,30 @@ func (s *Service) IngestOne(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("ingest service is not initialized")
 	}
 
-	source := strings.TrimSpace(req.Source)
-	if source == "" {
-		return Result{}, fmt.Errorf("source is required")
-	}
-
-	sourceItemID := strings.TrimSpace(req.SourceItemID)
-	if sourceItemID == "" {
-		return Result{}, fmt.Errorf("source_item_id is required")
-	}
-	collection := strings.TrimSpace(strings.ToLower(req.Collection))
-	if collection == "" {
-		return Result{}, fmt.Errorf("collection is required")
-	}
-
-	payloadCanonical, err := canonicalizeJSON(req.RawPayload)
+	normalized, err := s.normalizeRequest(req)
 	if err != nil {
-		return Result{}, fmt.Errorf("canonicalize raw payload: %w", err)
-	}
-	payloadHash := sha256.Sum256(payloadCanonical)
-
-	checkpointCanonical, err := s.resolveCheckpoint(req.CursorCheckpoint, sourceItemID)
-	if err != nil {
-		return Result{}, fmt.Errorf("resolve checkpoint: %w", err)
+		return Result{}, err
 	}
 
 	runStart := globaltime.UTC()
-	runID, runUUID, err := s.insertRun(ctx, source, normalizeNullableString(req.TriggeredByTopic), string(checkpointCanonical), runStart)
+	runID, runUUID, err := s.insertRun(ctx, normalized.source, normalized.triggeredByTopic, normalized.cursorCheckpoint, runStart)
 	if err != nil {
 		return Result{}, fmt.Errorf("insert ingest run: %w", err)
 	}
 
-	insertResult, ingestErr := s.insertRawAndCheckpointTx(
-		ctx,
-		runID,
-		source,
-		sourceItemID,
-		collection,
-		normalizeNullableString(req.SourceItemURL),
-		normalizeNullableTime(req.SourcePublishedAt),
-		string(payloadCanonical),
-		payloadHash[:],
-		normalizeNullableJSON(req.ResponseHeaders),
-		string(checkpointCanonical),
-		globaltime.UTC(),
-	)
+	insertResult, ingestErr := s.insertNormalizedRequest(ctx, runID, normalized)
 	if ingestErr != nil {
-		failedAt := globaltime.UTC()
-		markErr := s.markRunFailed(ctx, runID, ingestErr, failedAt)
-		if markErr != nil {
-			return Result{}, fmt.Errorf("ingest tx failed (%v); failed to mark run failed: %w", ingestErr, markErr)
-		}
-		return Result{}, ingestErr
+		return Result{}, s.failRun(ctx, runID, ingestErr)
 	}
 
-	itemsInserted := 0
-	if insertResult.inserted {
-		itemsInserted = 1
-	}
-
-	finishedAt := globaltime.UTC()
-	if err := s.markRunCompleted(ctx, runID, itemsInserted, string(checkpointCanonical), finishedAt); err != nil {
+	if err := s.completeRun(ctx, runID, insertResult.inserted, normalized.cursorCheckpoint); err != nil {
 		return Result{}, fmt.Errorf("mark ingest run completed: %w", err)
 	}
 
 	s.logger.Info().
 		Int64("run_id", runID).
-		Str("source", source).
-		Str("source_item_id", sourceItemID).
+		Str("source", normalized.source).
+		Str("source_item_id", normalized.sourceItemID).
 		Bool("inserted", insertResult.inserted).
 		Msg("ingest completed")
 
@@ -135,9 +103,94 @@ func (s *Service) IngestOne(ctx context.Context, req Request) (Result, error) {
 		RawArrivalID:   insertResult.rawArrivalID,
 		RawArrivalUUID: insertResult.rawArrivalUUID,
 		Inserted:       insertResult.inserted,
-		PayloadHashHex: hex.EncodeToString(payloadHash[:]),
+		PayloadHashHex: hex.EncodeToString(normalized.payloadHash[:]),
 		Status:         "completed",
 	}, nil
+}
+
+func (s *Service) normalizeRequest(req Request) (normalizedRequest, error) {
+	source, err := requiredTrimmed(req.Source, "source")
+	if err != nil {
+		return normalizedRequest{}, err
+	}
+	sourceItemID, err := requiredTrimmed(req.SourceItemID, "source_item_id")
+	if err != nil {
+		return normalizedRequest{}, err
+	}
+	collection, err := requiredLowerTrimmed(req.Collection, "collection")
+	if err != nil {
+		return normalizedRequest{}, err
+	}
+	payloadCanonical, err := canonicalizeJSON(req.RawPayload)
+	if err != nil {
+		return normalizedRequest{}, fmt.Errorf("canonicalize raw payload: %w", err)
+	}
+	checkpointCanonical, err := s.resolveCheckpoint(req.CursorCheckpoint, sourceItemID)
+	if err != nil {
+		return normalizedRequest{}, fmt.Errorf("resolve checkpoint: %w", err)
+	}
+	return normalizedRequest{
+		source:            source,
+		sourceItemID:      sourceItemID,
+		collection:        collection,
+		sourceItemURL:     normalizeNullableString(req.SourceItemURL),
+		sourcePublishedAt: normalizeNullableTime(req.SourcePublishedAt),
+		rawPayload:        string(payloadCanonical),
+		payloadHash:       sha256.Sum256(payloadCanonical),
+		cursorCheckpoint:  string(checkpointCanonical),
+		triggeredByTopic:  normalizeNullableString(req.TriggeredByTopic),
+		responseHeaders:   normalizeNullableJSON(req.ResponseHeaders),
+	}, nil
+}
+
+func requiredTrimmed(raw string, field string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", field)
+	}
+	return value, nil
+}
+
+func requiredLowerTrimmed(raw string, field string) (string, error) {
+	value, err := requiredTrimmed(raw, field)
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(value), nil
+}
+
+func (s *Service) insertNormalizedRequest(ctx context.Context, runID int64, req normalizedRequest) (insertTxResult, error) {
+	return s.insertRawAndCheckpointTx(
+		ctx,
+		runID,
+		req.source,
+		req.sourceItemID,
+		req.collection,
+		req.sourceItemURL,
+		req.sourcePublishedAt,
+		req.rawPayload,
+		req.payloadHash[:],
+		req.responseHeaders,
+		req.cursorCheckpoint,
+		globaltime.UTC(),
+	)
+}
+
+func (s *Service) failRun(ctx context.Context, runID int64, ingestErr error) error {
+	failedAt := globaltime.UTC()
+	markErr := s.markRunFailed(ctx, runID, ingestErr, failedAt)
+	if markErr != nil {
+		return fmt.Errorf("ingest tx failed (%v); failed to mark run failed: %w", ingestErr, markErr)
+	}
+	return ingestErr
+}
+
+func (s *Service) completeRun(ctx context.Context, runID int64, inserted bool, checkpoint string) error {
+	itemsInserted := 0
+	if inserted {
+		itemsInserted = 1
+	}
+	return s.markRunCompleted(ctx, runID, itemsInserted, checkpoint, globaltime.UTC())
 }
 
 type insertTxResult struct {

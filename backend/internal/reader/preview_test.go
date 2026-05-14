@@ -101,3 +101,35 @@ func TestFetchTextWithOptionsReportsUnreadableHTML(t *testing.T) {
 		t.Fatalf("expected readability render error, got %v", err)
 	}
 }
+
+func TestBestExtractedTextFallbackOrder(t *testing.T) {
+	t.Parallel()
+
+	got, err := bestExtractedText(" article text ", "excerpt", "title")
+	if err != nil {
+		t.Fatalf("bestExtractedText() error = %v", err)
+	}
+	if got != " article text " {
+		t.Fatalf("bestExtractedText() = %q, want article text", got)
+	}
+
+	got, err = bestExtractedText("", "excerpt", "title")
+	if err != nil {
+		t.Fatalf("bestExtractedText excerpt fallback error = %v", err)
+	}
+	if got != "excerpt" {
+		t.Fatalf("bestExtractedText excerpt fallback = %q, want excerpt", got)
+	}
+
+	got, err = bestExtractedText("", "", " title ")
+	if err != nil {
+		t.Fatalf("bestExtractedText title fallback error = %v", err)
+	}
+	if got != "title" {
+		t.Fatalf("bestExtractedText title fallback = %q, want title", got)
+	}
+
+	if _, err := bestExtractedText("", "", " "); err == nil {
+		t.Fatalf("bestExtractedText empty fallback error = nil, want error")
+	}
+}

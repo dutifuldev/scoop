@@ -132,6 +132,21 @@ func printJSON(value any) error {
 	return encoder.Encode(value)
 }
 
+func renderJSONOrTable(value any, outputFormat string, writeRows func() error) int {
+	if outputFormat == outputFormatJSON {
+		if err := printJSON(value); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to encode JSON: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if err := writeRows(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func writeTable(headers []string, rows [][]string) error {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	if _, err := fmt.Fprintln(writer, strings.Join(headers, "\t")); err != nil {
@@ -143,6 +158,12 @@ func writeTable(headers []string, rows [][]string) error {
 		}
 	}
 	return writer.Flush()
+}
+
+func printUsageLines(lines ...string) {
+	for _, line := range lines {
+		fmt.Fprintln(os.Stderr, line)
+	}
 }
 
 func connectReadPool(timeout time.Duration, envLoader *cli.EnvLoader) (context.Context, context.CancelFunc, *db.Pool, error) {

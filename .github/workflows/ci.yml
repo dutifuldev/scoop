@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -50,7 +50,7 @@ jobs:
           fi
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.0
           working-directory: backend
@@ -86,7 +86,7 @@ jobs:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
         run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go crap .
 
-      - name: Slophammer mutation gate
+      - name: Slophammer mutate4go mutation gate
         run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go mutate . --scan
 
       - name: Slophammer executable check
@@ -100,16 +100,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           check-latest: true
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
 
@@ -135,13 +135,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8.1.0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version-file: embedding-service/.python-version
 

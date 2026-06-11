@@ -1,20 +1,24 @@
 go:
-  coverage_threshold: 85
-  dry_max_candidates: 0
-  dry_paths:
-    - backend/cmd
-    - backend/internal
-    - backend/schema
-  dry_exclude:
-    - "**/*_test.go"
-    - "**/testdata/**"
-    - "**/fixtures/**"
-  crap_max_score: 8
-  mutation_targets:
-    - backend/internal/language/normalize.go
-    - backend/internal/reader/preview.go
-    - backend/internal/httpapi/tag_handlers.go
-    - backend/internal/httpapi/person_identity_handlers.go
+  coverage:
+    threshold: 85
+  dry:
+    max_findings: 0
+    paths:
+      - backend/cmd
+      - backend/internal
+      - backend/schema
+    exclude:
+      - "**/*_test.go"
+      - "**/testdata/**"
+      - "**/fixtures/**"
+  crap:
+    max_score: 8
+  mutation:
+    targets:
+      - backend/internal/language/normalize.go
+      - backend/internal/reader/preview.go
+      - backend/internal/httpapi/tag_handlers.go
+      - backend/internal/httpapi/person_identity_handlers.go
   dependency_boundaries:
     - from: backend/cmd/scoop
       allow:

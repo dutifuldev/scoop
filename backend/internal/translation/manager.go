@@ -157,7 +157,12 @@ func (m *Manager) TranslateArticleByUUID(ctx context.Context, articleUUID string
 		return RunStats{}, err
 	}
 
-	tasks := make([]translationTask, 0, 2)
+	tasks := appendArticleTranslationTasks(make([]translationTask, 0, 2), article)
+
+	return m.runTasks(ctx, tasks, opts)
+}
+
+func appendArticleTranslationTasks(tasks []translationTask, article articleTranslationTarget) []translationTask {
 	if strings.TrimSpace(article.Title) != "" {
 		tasks = append(tasks, translationTask{
 			SourceType:    SourceTypeArticleTitle,
@@ -176,8 +181,7 @@ func (m *Manager) TranslateArticleByUUID(ctx context.Context, articleUUID string
 			ContentOrigin: article.TextOrigin,
 		})
 	}
-
-	return m.runTasks(ctx, tasks, opts)
+	return tasks
 }
 
 func (m *Manager) TranslateCollection(ctx context.Context, collection string, opts CollectionRunOptions) (RunStats, error) {
@@ -299,24 +303,7 @@ func (m *Manager) translateStory(ctx context.Context, story storyTranslationTarg
 	}
 
 	for _, article := range articles {
-		if strings.TrimSpace(article.Title) != "" {
-			tasks = append(tasks, translationTask{
-				SourceType:    SourceTypeArticleTitle,
-				SourceID:      article.ArticleID,
-				SourceLang:    article.SourceLang,
-				OriginalText:  article.Title,
-				ContentOrigin: ContentOriginNormalized,
-			})
-		}
-		if strings.TrimSpace(article.Text) != "" {
-			tasks = append(tasks, translationTask{
-				SourceType:    SourceTypeArticleText,
-				SourceID:      article.ArticleID,
-				SourceLang:    article.SourceLang,
-				OriginalText:  article.Text,
-				ContentOrigin: article.TextOrigin,
-			})
-		}
+		tasks = appendArticleTranslationTasks(tasks, article)
 	}
 
 	return m.runTasks(ctx, tasks, opts)

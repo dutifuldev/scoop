@@ -462,41 +462,43 @@ func executePersonIdentitiesListCommand(cfg personIdentitiesListCommandConfig) i
 }
 
 func runPersonIdentitiesShow(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: scoop person-identities show <identity_ref-or-person_identity_uuid>")
-		return 2
-	}
-	fs := newAppFlagSet("person-identities show")
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	if exitCode, ok := parseAppFlagSet(fs, args[1:]); !ok {
-		return exitCode
-	}
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "too many positional arguments")
-		return 2
-	}
-	return runWithReadPool(*timeout, envLoader, func(ctx context.Context, pool *db.Pool) int {
-		identity, err := pool.GetPersonIdentity(ctx, args[0])
-		if err != nil {
-			if errors.Is(err, db.ErrNoRows) {
-				fmt.Fprintln(os.Stderr, "Person identity not found")
-				return 1
-			}
-			fmt.Fprintf(os.Stderr, "Failed to show person identity: %v\n", err)
-			return 1
-		}
-		return printPersonIdentityResult(identity, *format)
-	})
+	return runPersonIdentityCommand(
+		"person-identities show",
+		"usage: scoop person-identities show <identity_ref-or-person_identity_uuid>",
+		args,
+		"Failed to show person identity",
+		func(ctx context.Context, pool *db.Pool, ref string) (*db.PersonIdentityRecord, error) {
+			return pool.GetPersonIdentity(ctx, ref)
+		},
+	)
 }
 
 func runPersonIdentitiesArchive(args []string, archived bool) int {
+	return runPersonIdentityCommand(
+		"person-identities archive",
+		"usage: scoop person-identities archive <identity_ref-or-person_identity_uuid>",
+		args,
+		"Failed to update person identity",
+		func(ctx context.Context, pool *db.Pool, ref string) (*db.PersonIdentityRecord, error) {
+			return pool.SetPersonIdentityArchived(ctx, ref, archived, globaltime.UTC())
+		},
+	)
+}
+
+// runPersonIdentityCommand runs a single-identity command: shared flag
+// parsing, the identity operation, and result printing.
+func runPersonIdentityCommand(
+	name string,
+	usage string,
+	args []string,
+	failure string,
+	operation func(context.Context, *db.Pool, string) (*db.PersonIdentityRecord, error),
+) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: scoop person-identities archive <identity_ref-or-person_identity_uuid>")
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
-	fs := newAppFlagSet("person-identities archive")
+	fs := newAppFlagSet(name)
 	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
 	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
 	format := fs.String("format", outputFormatTable, "Output format: table or json")
@@ -508,13 +510,13 @@ func runPersonIdentitiesArchive(args []string, archived bool) int {
 		return 2
 	}
 	return runWithReadPool(*timeout, envLoader, func(ctx context.Context, pool *db.Pool) int {
-		identity, err := pool.SetPersonIdentityArchived(ctx, args[0], archived, globaltime.UTC())
+		identity, err := operation(ctx, pool, args[0])
 		if err != nil {
 			if errors.Is(err, db.ErrNoRows) {
 				fmt.Fprintln(os.Stderr, "Person identity not found")
 				return 1
 			}
-			fmt.Fprintf(os.Stderr, "Failed to update person identity: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s: %v\n", failure, err)
 			return 1
 		}
 		return printPersonIdentityResult(identity, *format)

@@ -129,39 +129,58 @@ func parseTagsCreateCommand(args []string) (tagsCreateCommandConfig, int, bool) 
 	}
 	slug := args[0]
 
-	fs := newAppFlagSet("tags create")
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	description := fs.String("description", "", "Description")
-	color := fs.String("color", "", "Tag color as #RRGGBB")
-	highlightColor := fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB")
-	if err := fs.Parse(args[1:]); err != nil {
+	flags := newTagAttributeFlagSet("tags create")
+	if err := flags.fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return tagsCreateCommandConfig{}, 0, false
 		}
 		return tagsCreateCommandConfig{}, 2, false
 	}
-	if fs.NArg() != 0 {
+	if flags.fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "tags create accepts only one tag")
 		return tagsCreateCommandConfig{}, 2, false
 	}
-	outputFormat, err := parseOutputFormat(*format, outputFormatTable)
+	outputFormat, err := parseOutputFormat(*flags.format, outputFormatTable)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid format: %v\n", err)
 		return tagsCreateCommandConfig{}, 2, false
 	}
 	return tagsCreateCommandConfig{
-		envLoader: envLoader,
-		timeout:   *timeout,
+		envLoader: flags.envLoader,
+		timeout:   *flags.timeout,
 		format:    outputFormat,
 		opts: db.UpsertTagOptions{
 			Slug:           slug,
-			Description:    stringPtrFromFlag(description),
-			Color:          stringPtrFromFlag(color),
-			HighlightColor: stringPtrFromFlag(highlightColor),
+			Description:    stringPtrFromFlag(flags.description),
+			Color:          stringPtrFromFlag(flags.color),
+			HighlightColor: stringPtrFromFlag(flags.highlightColor),
 		},
 	}, 0, true
+}
+
+// tagAttributeFlags bundles the flag set shared by the tag commands that
+// accept the tag attribute flags alongside the common app flags.
+type tagAttributeFlags struct {
+	fs             *flag.FlagSet
+	envLoader      *cli.EnvLoader
+	timeout        *time.Duration
+	format         *string
+	description    *string
+	color          *string
+	highlightColor *string
+}
+
+func newTagAttributeFlagSet(name string) tagAttributeFlags {
+	fs := newAppFlagSet(name)
+	return tagAttributeFlags{
+		fs:             fs,
+		envLoader:      cli.AddEnvFlag(fs, ".env", "Path to the .env file"),
+		timeout:        fs.Duration("timeout", 30*time.Second, "Command timeout"),
+		format:         fs.String("format", outputFormatTable, "Output format: table or json"),
+		description:    fs.String("description", "", "Description"),
+		color:          fs.String("color", "", "Tag color as #RRGGBB"),
+		highlightColor: fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB"),
+	}
 }
 
 func executeTagsCreateCommand(cfg tagsCreateCommandConfig) int {
@@ -215,24 +234,18 @@ func runTagsUpdate(args []string) int {
 	if !ok {
 		return exitCode
 	}
-	fs := newAppFlagSet("tags update")
-	envLoader := cli.AddEnvFlag(fs, ".env", "Path to the .env file")
-	timeout := fs.Duration("timeout", 30*time.Second, "Command timeout")
-	format := fs.String("format", outputFormatTable, "Output format: table or json")
-	description := fs.String("description", "", "Description")
-	color := fs.String("color", "", "Tag color as #RRGGBB")
-	highlightColor := fs.String("highlight-color", "", "Article/story highlight color as #RRGGBB")
-	if err := fs.Parse(args[1:]); err != nil {
+	flags := newTagAttributeFlagSet("tags update")
+	if err := flags.fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	if fs.NArg() != 0 {
+	if flags.fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "too many positional arguments")
 		return 2
 	}
-	return updateTag(slug, tagUpdateOptionsFromFlags(description, color, highlightColor), *timeout, envLoader, *format)
+	return updateTag(slug, tagUpdateOptionsFromFlags(flags.description, flags.color, flags.highlightColor), *flags.timeout, flags.envLoader, *flags.format)
 }
 
 func parseRequiredTagSlugArg(args []string) (string, int, bool) {

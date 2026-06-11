@@ -76,23 +76,28 @@ jobs:
         run: ./scripts/check-go-coverage.sh
 
       - name: Slophammer static check
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check .
+        working-directory: backend
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 check ..
 
       - name: Slophammer DRY gate
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go dry .
+        working-directory: backend
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 dry ..
 
       - name: Slophammer CRAP gate
         env:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go crap .
+        working-directory: backend
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 crap ..
 
       - name: Slophammer mutate4go mutation gate
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest go mutate . --scan
+        working-directory: backend
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 mutate .. --scan
 
       - name: Slophammer executable check
         env:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check . --execute
+        working-directory: backend
+        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 check .. --execute
 
   frontend:
     name: Frontend (TypeScript)

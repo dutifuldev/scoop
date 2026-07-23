@@ -17,6 +17,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"horse.fit/scoop/internal/db"
+	"horse.fit/scoop/internal/globaltime"
 )
 
 func TestServiceNormalizeEmbedAndDedupIntegration(t *testing.T) {
@@ -143,7 +144,7 @@ func TestServicePipelineNoopsWithEmptyQueuesIntegration(t *testing.T) {
 func TestServiceDedupPendingSemanticAutoMergeIntegration(t *testing.T) {
 	pool := newPipelineIntegrationPool(t)
 	ctx := context.Background()
-	now := time.Date(2026, 5, 14, 13, 0, 0, 0, time.UTC)
+	now := globaltime.UTC().Add(-time.Hour)
 	createPipelineRawArrival(t, pool, "discord_archive", "semantic-1", "https://example.com/openclaw-setup-a", "OpenClaw setup guide", now)
 	createPipelineRawArrival(t, pool, "discord_archive", "semantic-2", "https://example.com/openclaw-setup-b", "OpenClaw setup walkthrough", now.Add(time.Minute))
 
@@ -243,7 +244,7 @@ func TestServiceDedupPendingExactContentHashIntegration(t *testing.T) {
 func TestServiceDedupPendingSemanticGrayZoneIntegration(t *testing.T) {
 	pool := newPipelineIntegrationPool(t)
 	ctx := context.Background()
-	now := time.Date(2026, 5, 14, 15, 0, 0, 0, time.UTC)
+	now := globaltime.UTC().Add(-time.Hour)
 	createPipelineRawArrival(t, pool, "discord_archive", "gray-1", "https://example.com/gray-a", "OpenClaw deployment gateway setup", now)
 	createPipelineRawArrival(t, pool, "discord_archive", "gray-2", "https://example.com/gray-b", "OpenClaw deployment gateway notes", now.Add(time.Minute))
 

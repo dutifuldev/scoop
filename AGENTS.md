@@ -34,8 +34,8 @@ go test ./... -count=1
 ./scripts/check-go-crap.sh
 ./scripts/check-go-mutation.sh
 cd ..
-go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check .
-go run github.com/dutifuldev/slophammer/go/cmd/slophammer@latest check . --execute
+go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 check .
+go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 check . --execute
 ```
 
 Before finishing frontend changes, run:

@@ -37,24 +37,24 @@ jobs:
 
       - name: Static Slophammer check
         working-directory: backend
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 check ..
+        run: go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 check ..
 
       - name: DRY check
         working-directory: backend
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 dry ..
+        run: go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 dry ..
 
       - name: CRAP check
         env:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
         working-directory: backend
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 crap ..
+        run: go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 crap ..
 
       - name: mutate4go mutation smoke check
         working-directory: backend
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 mutate .. --scan
+        run: go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 mutate .. --scan
 
       - name: Executable Slophammer check
         env:
           DATABASE_URL: postgres://news:testpass@localhost:5432/news_pipeline?sslmode=disable
         working-directory: backend
-        run: go run github.com/dutifuldev/slophammer/go/cmd/slophammer-go@v0.3.0 check .. --execute
+        run: go run github.com/osolmaz/slophammer/go/cmd/slophammer-go@v0.4.1 check .. --execute

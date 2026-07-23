@@ -16,7 +16,6 @@ go:
   mutation:
     targets:
       - backend/internal/language/normalize.go
-      - backend/internal/reader/preview.go
       - backend/internal/httpapi/tag_handlers.go
       - backend/internal/httpapi/person_identity_handlers.go
   dependency_boundaries:

@@ -36,10 +36,8 @@ func NormalizeCode(raw string) string {
 	if tag == "" {
 		return ""
 	}
-	if dash := strings.IndexByte(tag, '-'); dash >= 0 {
-		return tag[:dash]
-	}
-	return tag
+	primary, _, _ := strings.Cut(tag, "-")
+	return primary
 }
 
 func isAlphaLower(value string) bool {
@@ -50,3 +48,7 @@ func isAlphaLower(value string) bool {
 	}
 	return true
 }
+
+// mutate4go-manifest-begin
+// {"version":1,"tested_at":"2026-07-23T14:04:30+08:00","module_hash":"51a646dff95e66b12567f0205019e660eabd282342edf9160dad81bdefd32a31","functions":[{"id":"func/NormalizeTag","name":"NormalizeTag","line":7,"end_line":31,"hash":"314d77634ca4bcc74b69c9aa12af669f157f8ad83d111e15f6c4ea29cc59990d"},{"id":"func/NormalizeCode","name":"NormalizeCode","line":34,"end_line":41,"hash":"a65a49e4bb3fa6e996a9e136ef303e76112ab2ebf2650bee7641d35a9f87a365"},{"id":"func/isAlphaLower","name":"isAlphaLower","line":43,"end_line":50,"hash":"01b03996e8f65c7ba5383b9479781f218cc7160e70e899cc2ba121c663bd1d45"}]}
+// mutate4go-manifest-end

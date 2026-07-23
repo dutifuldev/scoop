@@ -80,3 +80,7 @@ func (s *Server) handleRemoveArticlePersonIdentity(c echo.Context) error {
 	}
 	return success(c, map[string]any{"article_uuid": articleUUID, "person_identity": identityRefOrUUID})
 }
+
+// mutate4go-manifest-begin
+// {"version":1,"tested_at":"2026-07-23T14:18:58+08:00","module_hash":"4927d80c6f38421d691aeacaa05b315f0d0c1c22d0523a10951c38c8ee339376","functions":[{"id":"func/Server.handlePersonIdentities","name":"Server.handlePersonIdentities","line":16,"end_line":25,"hash":"1bb696231be6b0e9bcab13e1438b8ad491095299cd9f9859a16daa346252fe1c"},{"id":"func/Server.handleArticlePersonIdentities","name":"Server.handleArticlePersonIdentities","line":27,"end_line":38,"hash":"6c4f379f6b77ad289062e27f25fd04ee737801437e8c02bf824b0c16af158411"},{"id":"func/Server.handleAddArticlePersonIdentity","name":"Server.handleAddArticlePersonIdentity","line":40,"end_line":62,"hash":"bd5d6f8f8b8bea9a4c49b649ccb2193df2a809025ab75b1dfca4be1a2ff77ef0"},{"id":"func/Server.handleRemoveArticlePersonIdentity","name":"Server.handleRemoveArticlePersonIdentity","line":64,"end_line":82,"hash":"cbc253cc53462cadafa9d843eeec6dbba9d5fe31df65f5cbf9c547790a464078"}]}
+// mutate4go-manifest-end

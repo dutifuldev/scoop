@@ -267,6 +267,17 @@ func TestServerReadHandlersIntegration(t *testing.T) {
 	}
 	assertHTTPStatus(t, articlePeopleRecorder.Code, http.StatusOK)
 
+	_, canceledArticlePeopleContext, canceledArticlePeopleRecorder := newJSONContext(http.MethodGet, "/api/v1/articles/"+fixture.firstArticle.ArticleUUID+"/person-identities", "")
+	canceledArticlePeopleContext.SetParamNames("article_uuid")
+	canceledArticlePeopleContext.SetParamValues(fixture.firstArticle.ArticleUUID)
+	canceledContext, cancel := context.WithCancel(canceledArticlePeopleContext.Request().Context())
+	cancel()
+	canceledArticlePeopleContext.SetRequest(canceledArticlePeopleContext.Request().WithContext(canceledContext))
+	if err := server.handleArticlePersonIdentities(canceledArticlePeopleContext); err != nil {
+		t.Fatalf("handleArticlePersonIdentities(canceled) error = %v", err)
+	}
+	assertHTTPStatus(t, canceledArticlePeopleRecorder.Code, http.StatusInternalServerError)
+
 	if err := pool.GORM().Model(&db.Article{}).
 		Where("article_id = ?", fixture.firstArticle.ArticleID).
 		Update("source", "discord_archive").Error; err != nil {
